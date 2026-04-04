@@ -22,35 +22,39 @@ jobs:
           const { chromium } = require('playwright');
           (async () => {
             const browser = await chromium.launch();
-            const page = await browser.newPage();
-            // 使用較寬的視窗以確保右側數據不被切掉
-            await page.setViewportSize({ width: 1600, height: 1200 });
+            const context = await browser.newContext({
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              viewport: { width: 1600, height: 1200 }
+            });
+            const page = await context.newPage();
             try {
-              console.log('正在前往圖表頁面...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 90000 });
-              
-              // 1. 強制等待圖表數據加載 (40秒)
-              await page.waitForTimeout(40000); 
+              console.log('1. 先進入首頁以獲得 Cookie...');
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
+              await page.waitForTimeout(5000);
 
-              // 2. 精確定位：只針對包含圖表與座標軸的特定區塊
-              // 該網站的核心圖表區塊通常是 .chart-container 或 .highcharts-container
+              console.log('2. 模擬真人跳轉至圖表頁面...');
+              // 使用強行跳轉，繞過伺服器的直接連結攔截
+              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'networkidle', timeout: 90000 });
+              
+              // 3. 關鍵：如果網址被踢回首頁，強制再跳一次
+              if (!page.url().includes('m2-global')) {
+                 console.log('檢測到跳轉回首頁，執行二次強行跳轉...');
+                 await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
+              }
+
+              console.log('3. 等待圖表數據加載 (45秒)...');
+              await page.waitForTimeout(45000); 
+
+              // 4. 定位圖表容器
               const chartElement = await page.$('.chart-container') || await page.$('.highcharts-container');
               
               if (chartElement) {
-                console.log('偵測到核心圖表區塊，進行精確截圖...');
-                await chartElement.screenshot({ 
-                  path: 'chart.png',
-                  animations: 'disabled' // 關閉動畫，確保線條定格
-                });
+                await chartElement.screenshot({ path: 'chart.png' });
+                console.log('成功截取圖表區塊！');
               } else {
-                console.log('找不到核心區塊，改用精確座標補捉圖表區域...');
-                // 這個座標經過計算，會避開頂部導航和底部文字，只抓中間圖表
-                await page.screenshot({ 
-                  path: 'chart.png', 
-                  clip: { x: 260, y: 10, width: 1340, height: 750 } 
-                });
+                // 最終保險：直接針對圖表所在的座標區域截圖
+                await page.screenshot({ path: 'chart.png', clip: { x: 260, y: 10, width: 1340, height: 800 } });
               }
-              console.log('截圖成功！');
             } catch (e) {
               await page.screenshot({ path: 'chart.png' });
             }
