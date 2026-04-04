@@ -23,12 +23,28 @@ jobs:
           (async () => {
             const browser = await chromium.launch();
             const page = await browser.newPage();
-            await page.setViewportSize({ width: 1400, height: 1200 });
+            // 放大視窗以包含所有側邊數據
+            await page.setViewportSize({ width: 1600, height: 1200 });
             try {
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded', timeout: 60000 });
+              console.log('正在前往圖表頁面...');
+              // 【關鍵修正】正確的圖表網址
+              await page.goto('https://bitcoincounterflow.com/charts/m2-global/', { waitUntil: 'networkidle', timeout: 90000 });
+              
+              // 模擬捲動並等待 40 秒讓動畫跑完
+              await page.evaluate(() => window.scrollTo(0, 400));
               await page.waitForTimeout(40000); 
-              const chart = await page.$('.chart-main-container') || await page.$('.chart-container') || await page.$('body');
-              await chart.screenshot({ path: 'chart.png' });
+
+              // 鎖定包含標題與數據的最外層容器
+              const chart = await page.$('.chart-main-container') || await page.$('.chart-container');
+              
+              if (chart) {
+                await chart.screenshot({ path: 'chart.png' });
+                console.log('已精確截取圖表區域');
+              } else {
+                // 若找不到容器，則針對圖表所在的中段區域截圖
+                await page.screenshot({ path: 'chart.png', clip: { x: 0, y: 120, width: 1600, height: 800 } });
+                console.log('找不到容器，使用中段座標截取');
+              }
             } catch (e) {
               await page.screenshot({ path: 'chart.png' });
             }
@@ -41,4 +57,4 @@ jobs:
 
       - name: Post
         run: |
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 最新圖表**\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 最新圖表更新**\"}" ${{ secrets.DISCORD_WEBHOOK }}
