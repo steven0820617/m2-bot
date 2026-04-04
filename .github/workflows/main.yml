@@ -1,4 +1,4 @@
-name: M2_Auto_Update_Final_V2
+name: M2_Auto_Update_FullRange
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -22,35 +22,24 @@ jobs:
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
-            // 模擬更完整的真人環境
             const browser = await chromium.launch({ args: ['--no-sandbox', '--disable-gpu'] });
-            const context = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-              viewport: { width: 1600, height: 1200 }
-            });
-            const page = await context.newPage();
+            const page = await browser.newPage();
+            // 增加視窗高度，確保底部年份能被渲染
+            await page.setViewportSize({ width: 1600, height: 1400 });
             try {
-              console.log('1. 先進入首頁以獲取信任...');
+              console.log('1. 進入首頁...');
               await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
               await page.waitForTimeout(5000);
 
-              console.log('2. 強制從瀏覽器內部切換網址...');
-              // 使用 JS 執行跳轉，避開伺服器的直接請求攔截
-              await page.evaluate(() => { window.location.href = '/charts/m2-global/'; });
+              console.log('2. 切換至圖表頁...');
+              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'networkidle', timeout: 90000 });
               
-              console.log('3. 等待圖表完全加載 (60秒)...');
-              // 給予極充裕的時間讓數據跑出來
+              // 3. 關鍵：稍微捲動並等待 60 秒，確保所有數據線條與年份刻度畫出來
+              await page.evaluate(() => window.scrollTo(0, 50)); 
               await page.waitForTimeout(60000); 
 
-              // 檢查網址，如果還是首頁，最後再硬試一次
-              if (!page.url().includes('m2-global')) {
-                console.log('仍被跳轉，嘗試最後一次直接進入...');
-                await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
-                await page.waitForTimeout(30000);
-              }
-
               await page.screenshot({ path: 'full.png' });
-              console.log('全螢幕截取成功');
+              console.log('原始全截取成功');
             } catch (e) {
               await page.screenshot({ path: 'full.png' });
             }
@@ -59,13 +48,14 @@ jobs:
           EOF
           node screenshot.js
 
-      - name: Crop Large Area
+      - name: Crop Full Area
         run: |
-          # 裁切中間大區塊：寬1400x高900，左偏200, 上偏100
-          # 這個範圍足夠大，通常能包住整張圖表
-          convert full.png -crop 1400x900+200+100 chart.png
-          echo "大範圍裁切完成"
+          # 修正裁切範圍：
+          # 寬 1400x 高 1000 (增加高度以包含年份)
+          # 左偏 200, 上偏 20 (向上移動以包含頂部數據)
+          convert full.png -crop 1400x1000+200+20 chart.png
+          echo "完整範圍裁切完成"
 
       - name: Post to Discord
         run: |
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 每日自動更新**\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 每日更新 (完整數據版)**\"}" ${{ secrets.DISCORD_WEBHOOK }}
