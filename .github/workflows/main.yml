@@ -2,6 +2,7 @@ name: M2_Auto_Update
 on:
   schedule:
     - cron: '0 0 * * 4'
+  workflow_dispatch: # 方便您手動按按鈕測試
 
 jobs:
   screenshot:
@@ -9,66 +10,69 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install and Run
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
         run: |
-          # 1. 安裝環境
           npm install playwright
-          npx playwright install chromium --with-deps
+          # 關鍵：除了安裝 chromium，還必須安裝系統層級的依賴
+          npx playwright install chromium
+          npx playwright install-deps chromium
           
-          # 2. 建立腳本 (優化定位與渲染等待)
+      - name: Run Screenshot Script
+        run: |
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
             const browser = await chromium.launch({ 
               headless: true,
-              args: ['--no-sandbox', '--disable-gpu', '--disable-software-rasterizer'] 
+              args: ['--no-sandbox', '--disable-setuid-sandbox'] 
             });
             const context = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-              viewport: { width: 1920, height: 1080 } // 使用標準 Full HD 確保佈局正確
+              viewport: { width: 1920, height: 1080 }
             });
             const page = await context.newPage();
+            
             try {
-              console.log('1. 先進入首頁以獲得伺服器信任...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 90000 });
+              console.log('1. 進入首頁建立信任...');
+              await page.goto('https://bitcoincounterflow.com/', { waitUntil: 'networkidle', timeout: 60000 });
               await page.waitForTimeout(5000);
 
-              console.log('2. 【關鍵修正】從瀏覽器內部強行跳轉到圖表頁...');
-              // 這裡不使用 API 請求，而是直接修改瀏覽器的網址位置，模擬真人點擊
-              await page.evaluate(() => { window.location.href = 'https://bitcoincounterflow.comcharts/m2-global/'; });
+              console.log('2. 修改網址跳轉至圖表頁面...');
+              await page.evaluate(() => { window.location.href = 'https://bitcoincounterflow.com/charts/m2-global/'; });
               
-              // 模擬捲動並等待 60 秒
+              console.log('3. 等待頁面渲染 (60秒)...');
+              await page.waitForTimeout(60000);
               await page.evaluate(() => window.scrollTo(0, 400));
-              console.log('3. 等待頁面穩定與數據渲染 (60秒)...');
-              // 延長等待時間，確保 Canvas 繪圖完成
-              await page.waitForTimeout(60000); 
 
-              // 檢查目前網址是否正確
-              console.log('目前所在網址：' + page.url());
-
-              // 4. 定位包含標題、數據、年份的最外層容器
-              const chart = await page.$('.chart-main-container') || await page.$('.chart-container') || await page.$('.highcharts-container');
+              // 嘗試抓取圖表容器
+              const chart = await page.$('.chart-main-container') || await page.$('.highcharts-container') || await page.$('.chart-container');
               
               if (chart && page.url().includes('m2-global')) {
                 console.log('執行精確截圖...');
                 await chart.screenshot({ path: 'chart.png' });
-                console.log('成功截取完整圖表區域！');
               } else {
-                console.log('定位失敗或被踢回，截取全螢幕供檢查...');
+                console.log('無法精確定位，改為全螢幕截圖...');
                 await page.screenshot({ path: 'chart.png' });
               }
             } catch (e) {
-              console.error('定位失敗，截取中段區域作為備份:', e.message);
-              await page.screenshot({ path: 'chart.png', clip: { x: 260, y: 100, width: 1340, height: 850 } });
+              console.error('執行錯誤:', e.message);
+              // 錯誤時至少留下一張截圖供 Debug
+              await page.screenshot({ path: 'chart.png' });
+            } finally {
+              await browser.close();
             }
-            await browser.close();
           })();
           EOF
-          
-          # 3. 執行腳本
           node screenshot.js
 
       - name: Post to Discord
+        if: always() # 確保截圖失敗也能看到回傳訊息（如果檔案存在的話）
         run: |
-          # 網址前後加上 ` 符號，防止產生超連結與預覽
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"\`https://bitcoincounterflow.comcharts/m2-global/\`\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          curl -X POST -F "file=@chart.png" \
+            -F "payload_json={\"content\": \"\`https://bitcoincounterflow.com/charts/m2-global/\`\"}" \
+            ${{ secrets.DISCORD_WEBHOOK }}
