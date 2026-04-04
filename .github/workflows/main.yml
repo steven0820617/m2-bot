@@ -2,7 +2,7 @@ name: M2_Auto_Update
 on:
   schedule:
     - cron: '0 0 * * 4'
-  workflow_dispatch: # 方便您手動按按鈕測試
+  workflow_dispatch: 
 
 jobs:
   screenshot:
@@ -18,7 +18,6 @@ jobs:
       - name: Install Dependencies
         run: |
           npm install playwright
-          # 關鍵：除了安裝 chromium，還必須安裝系統層級的依賴
           npx playwright install chromium
           npx playwright install-deps chromium
           
@@ -33,35 +32,36 @@ jobs:
             });
             const context = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-              viewport: { width: 1920, height: 1080 }
+              viewport: { width: 2560, height: 1440 } // 使用 2K 寬度確保圖表橫向不擁擠
             });
             const page = await context.newPage();
             
             try {
-              console.log('1. 進入首頁建立信任...');
-              await page.goto('https://bitcoincounterflow.com/', { waitUntil: 'networkidle', timeout: 60000 });
+              console.log('1. 進入首頁建立 Session...');
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 60000 });
               await page.waitForTimeout(5000);
 
               console.log('2. 修改網址跳轉至圖表頁面...');
-              await page.evaluate(() => { window.location.href = 'https://bitcoincounterflow.com/charts/m2-global/'; });
+              await page.evaluate(() => { window.location.href = 'https://bitcoincounterflow.comcharts/m2-global/'; });
               
-              console.log('3. 等待頁面渲染 (60秒)...');
-              await page.waitForTimeout(60000);
-              await page.evaluate(() => window.scrollTo(0, 400));
+              console.log('3. 等待頁面穩定渲染 (60秒)...');
+              // 等待 Highcharts 核心繪圖區出現
+              await page.waitForSelector('.highcharts-container', { timeout: 60000 });
+              await page.waitForTimeout(60000); 
+              await page.evaluate(() => window.scrollTo(0, 300)); // 輕微捲動避開頂部資訊欄
 
-              // 嘗試抓取圖表容器
-              const chart = await page.$('.chart-main-container') || await page.$('.highcharts-container') || await page.$('.chart-container');
+              // 4. 精確抓取「圖表主體」容器，這會包含標題、年份座標、數值，並自動排除左側 Sidebar
+              const chart = await page.$('.chart-container') || await page.$('.chart-main-container') || await page.$('.highcharts-container');
               
               if (chart && page.url().includes('m2-global')) {
-                console.log('執行精確截圖...');
+                console.log('執行精確區域截圖...');
                 await chart.screenshot({ path: 'chart.png' });
               } else {
-                console.log('無法精確定位，改為全螢幕截圖...');
+                console.log('定位失敗，截取全螢幕供檢查...');
                 await page.screenshot({ path: 'chart.png' });
               }
             } catch (e) {
               console.error('執行錯誤:', e.message);
-              // 錯誤時至少留下一張截圖供 Debug
               await page.screenshot({ path: 'chart.png' });
             } finally {
               await browser.close();
@@ -71,8 +71,8 @@ jobs:
           node screenshot.js
 
       - name: Post to Discord
-        if: always() # 確保截圖失敗也能看到回傳訊息（如果檔案存在的話）
+        if: always()
         run: |
           curl -X POST -F "file=@chart.png" \
-            -F "payload_json={\"content\": \"\`https://bitcoincounterflow.com/charts/m2-global/\`\"}" \
+            -F "payload_json={\"content\": \"\`https://bitcoincounterflow.comcharts/m2-global/\`\"}" \
             ${{ secrets.DISCORD_WEBHOOK }}
