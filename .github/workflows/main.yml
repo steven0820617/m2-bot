@@ -1,39 +1,44 @@
-      - name: Create Screenshot Script
+name: M2_Auto_Update
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install
+        run: |
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: Script
         run: |
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
-            const browser = await chromium.launch({ headless: true });
-            const context = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-              viewport: { width: 1400, height: 1200 }
-            });
-            const page = await context.newPage();
+            const browser = await chromium.launch();
+            const page = await browser.newPage();
+            await page.setViewportSize({ width: 1400, height: 1200 });
             try {
-              console.log('嘗試前往圖表頁...');
-              // 縮短等待條件，只要 HTML 下載完就開始執行
-              await page.goto('https://bitcoincounterflow.com', { 
-                waitUntil: 'domcontentloaded', 
-                timeout: 60000 
-              });
-
-              // 強制等待 35 秒讓圖表數據跑出來
-              console.log('等待數據渲染...');
-              await page.waitForTimeout(35000);
-
-              // 自動尋找圖表區塊，找不到就截取全網頁
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded', timeout: 60000 });
+              await page.waitForTimeout(40000); 
               const chart = await page.$('.chart-main-container') || await page.$('.chart-container') || await page.$('body');
-              
-              console.log('執行截圖...');
-              await chart.screenshot({ 
-                path: 'chart.png',
-                timeout: 60000 // 給截圖動作充裕時間
-              });
-              console.log('截圖完成！');
+              await chart.screenshot({ path: 'chart.png' });
             } catch (e) {
-              console.error('超時或錯誤，強制截取當前畫面:', e);
               await page.screenshot({ path: 'chart.png' });
             }
             await browser.close();
           })();
           EOF
+
+      - name: Run
+        run: node screenshot.js
+
+      - name: Post
+        run: |
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 最新圖表**\"}" ${{ secrets.DISCORD_WEBHOOK }}
