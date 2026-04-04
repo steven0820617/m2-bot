@@ -1,3 +1,21 @@
+name: M2_Auto_Update
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          npm install playwright
+          npx playwright install chromium --with-deps
+
       - name: Create Screenshot Script
         run: |
           cat << 'EOF' > screenshot.js
@@ -6,48 +24,26 @@
             const browser = await chromium.launch({ headless: true });
             const context = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-              viewport: { width: 1920, height: 1080 }
+              viewport: { width: 1600, height: 1200 }
             });
             const page = await context.newPage();
-            
             try {
-              console.log('前往圖表頁面...');
               await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 90000 });
-
-              // 確保動態數據（如右側數值標籤）載入完成
               await page.waitForTimeout(30000); 
-
-              // 【智慧定位：尋找包含標題與數據的最外層容器】
-              // 該網站通常以 .chart-main-container 作為整個資訊區塊的容器
-              // 如果失敗，則退而求其次抓取包含標題的父層元素
-              const selectors = ['.chart-main-container', '.chart-container-inner', '.chart-wrapper'];
-              let targetElement = null;
-
-              for (const s of selectors) {
-                targetElement = await page.$(s);
-                if (targetElement) {
-                  console.log(`成功定位容器: ${s}`);
-                  break;
-                }
-              }
-
-              if (targetElement) {
-                // 自動截取整個容器的範圍，不論它在網頁哪裡
-                await targetElement.screenshot({ 
-                  path: 'chart.png',
-                  animations: 'disabled' // 停止線條動畫，確保畫面定格
-                });
-                console.log('已精確截取完整圖表資訊區塊！');
-              } else {
-                // 若找不到特定容器，抓取 body 並讓它自動尋找圖表位置
-                console.log('未找到特定容器，自動搜索圖表區塊...');
-                const body = await page.$('body');
-                await body.screenshot({ path: 'chart.png' });
-              }
+              // 鎖定包含標題與數據的「最外層容器」
+              const container = page.locator('.chart-main-container, .chart-container').first();
+              await container.waitFor({ state: 'visible', timeout: 30000 });
+              await container.screenshot({ path: 'chart.png' });
             } catch (e) {
-              console.error('執行失敗:', e);
               await page.screenshot({ path: 'chart.png' });
             }
             await browser.close();
           })();
           EOF
+
+      - name: Run Screenshot Script
+        run: node screenshot.js
+
+      - name: Post to Discord
+        run: |
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 最新圖表**\"}" ${{ secrets.DISCORD_WEBHOOK }}
