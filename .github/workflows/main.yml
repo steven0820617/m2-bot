@@ -22,41 +22,44 @@ jobs:
           const { chromium } = require('playwright');
           (async () => {
             const browser = await chromium.launch();
-            const context = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-              viewport: { width: 1600, height: 1200 }
-            });
-            const page = await context.newPage();
+            const page = await browser.newPage();
+            // 設定大視窗
+            await page.setViewportSize({ width: 1600, height: 1200 });
+            
             try {
-              console.log('1. 先進入首頁以獲得 Cookie...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
-              await page.waitForTimeout(5000);
+              console.log('1. 嘗試進入圖表網址...');
+              // 使用更高的超時限制 (60秒) 且只要 DOM 載入就開始
+              await page.goto('https://bitcoincounterflow.com', { 
+                waitUntil: 'domcontentloaded', 
+                timeout: 60000 
+              });
 
-              console.log('2. 模擬真人跳轉至圖表頁面...');
-              // 使用強行跳轉，繞過伺服器的直接連結攔截
-              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'networkidle', timeout: 90000 });
-              
-              // 3. 關鍵：如果網址被踢回首頁，強制再跳一次
-              if (!page.url().includes('m2-global')) {
-                 console.log('檢測到跳轉回首頁，執行二次強行跳轉...');
-                 await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
+              // 2. 解決「跳回首頁」問題：如果網址不對，強制再跳一次並等待
+              for (let i = 0; i < 2; i++) {
+                if (!page.url().includes('m2-global')) {
+                  console.log('檢測到跳轉，重新導向目標頁面...');
+                  await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded' });
+                  await page.waitForTimeout(5000);
+                }
               }
 
-              console.log('3. 等待圖表數據加載 (45秒)...');
-              await page.waitForTimeout(45000); 
-
-              // 4. 定位圖表容器
-              const chartElement = await page.$('.chart-container') || await page.$('.highcharts-container');
+              console.log('2. 等待圖表元件出現...');
+              // 針對圖表容器進行等待
+              const selector = '.chart-container';
+              await page.waitForSelector(selector, { timeout: 60000 });
               
-              if (chartElement) {
-                await chartElement.screenshot({ path: 'chart.png' });
-                console.log('成功截取圖表區塊！');
-              } else {
-                // 最終保險：直接針對圖表所在的座標區域截圖
-                await page.screenshot({ path: 'chart.png', clip: { x: 260, y: 10, width: 1340, height: 800 } });
-              }
+              // 3. 額外給 15 秒讓動態數據線條完全畫出來
+              await page.waitForTimeout(15000);
+
+              console.log('3. 執行精確截圖...');
+              const chart = await page.$(selector);
+              // 設定截圖不限制時間 (timeout: 0)，防止字體載入太慢導致報錯
+              await chart.screenshot({ path: 'chart.png', timeout: 0 });
+              console.log('成功截取圖表！');
+              
             } catch (e) {
-              await page.screenshot({ path: 'chart.png' });
+              console.error('發生錯誤，嘗試備份截圖:', e.message);
+              await page.screenshot({ path: 'chart.png', timeout: 0 });
             }
             await browser.close();
           })();
