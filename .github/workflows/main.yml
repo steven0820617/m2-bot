@@ -66,4 +66,4 @@ jobs:
         run: |
           # 裁切：寬1400x高1100，從左偏200, 上偏20 (包含標題、數據、年份)
           convert full.png -crop 1400x1100+200+20 chart.png
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 每日圖表更新**\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC**\"}" ${{ secrets.DISCORD_WEBHOOK }}
