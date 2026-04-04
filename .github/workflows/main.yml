@@ -57,4 +57,4 @@ jobs:
       - name: Post to Discord
         run: |
           # 發送到 Discord (請確保您的 DISCORD_WEBHOOK Secret 沒填錯)
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC**\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"https://bitcoincounterflow.com/charts/m2-global/"}" ${{ secrets.DISCORD_WEBHOOK }}
