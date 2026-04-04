@@ -1,7 +1,7 @@
 name: M2_Auto_Update
 on:
   schedule:
-    - cron: '50 9 * * *'  # 每天 UTC 00:00 (台灣早上 08:00) 自動執行
+    - cron: '53 9 * * *'  # 每天 UTC 00:00 (台灣早上 08:00) 自動執行
   workflow_dispatch:      # 允許手動點擊測試
 
 jobs:
