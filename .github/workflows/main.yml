@@ -28,37 +28,39 @@ jobs:
           (async () => {
             const browser = await chromium.launch({ 
               headless: true,
-              args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+              args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security'] 
             });
             const context = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-              viewport: { width: 2560, height: 1440 } // 使用 2K 寬度確保圖表橫向不擁擠
+              viewport: { width: 2560, height: 1440 },
+              deviceScaleFactor: 2 // 提高縮放比例，防止畫布渲染空白
             });
             const page = await context.newPage();
             
             try {
-              console.log('1. 進入首頁建立 Session...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 60000 });
-              await page.waitForTimeout(5000);
+              console.log('1. 直接導航至圖表頁面...');
+              // 使用 networkidle 確保數據請求已完成
+              await page.goto('https://bitcoincounterflow.com', { 
+                waitUntil: 'networkidle', 
+                timeout: 90000 
+              });
 
-              console.log('2. 修改網址跳轉至圖表頁面...');
-              await page.evaluate(() => { window.location.href = 'https://bitcoincounterflow.comcharts/m2-global/'; });
+              console.log('2. 等待圖表 SVG 渲染...');
+              // 等待 highcharts 繪圖核心出現
+              await page.waitForSelector('.highcharts-root', { timeout: 60000 });
               
-              console.log('3. 等待頁面穩定渲染 (60秒)...');
-              // 等待 Highcharts 核心繪圖區出現
-              await page.waitForSelector('.highcharts-container', { timeout: 60000 });
-              await page.waitForTimeout(60000); 
-              await page.evaluate(() => window.scrollTo(0, 300)); // 輕微捲動避開頂部資訊欄
+              console.log('3. 額外等待數據填充 (30秒)...');
+              await page.waitForTimeout(30000); 
 
-              // 4. 精確抓取「圖表主體」容器，這會包含標題、年份座標、數值，並自動排除左側 Sidebar
-              const chart = await page.$('.chart-container') || await page.$('.chart-main-container') || await page.$('.highcharts-container');
+              // 4. 精確抓取圖表區域 (排除側邊欄)
+              const chart = await page.$('.highcharts-container') || await page.$('.chart-container');
               
-              if (chart && page.url().includes('m2-global')) {
+              if (chart) {
                 console.log('執行精確區域截圖...');
                 await chart.screenshot({ path: 'chart.png' });
               } else {
-                console.log('定位失敗，截取全螢幕供檢查...');
-                await page.screenshot({ path: 'chart.png' });
+                console.log('找不到容器，截取全螢幕備份...');
+                await page.screenshot({ path: 'chart.png', fullPage: true });
               }
             } catch (e) {
               console.error('執行錯誤:', e.message);
@@ -74,5 +76,5 @@ jobs:
         if: always()
         run: |
           curl -X POST -F "file=@chart.png" \
-            -F "payload_json={\"content\": \"\`https://bitcoincounterflow.comcharts/m2-global/\`\"}" \
+            -F "payload_json={\"content\": \"\`https://bitcoincounterflow.com\`\"}" \
             ${{ secrets.DISCORD_WEBHOOK }}
