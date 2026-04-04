@@ -1,4 +1,4 @@
-name: M2_Auto_Update_Final_V9
+name: M2_Auto_Update_Final_V10
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -17,7 +17,7 @@ jobs:
           npm install playwright
           npx playwright install chromium --with-deps
           
-          # 2. 建立腳本 (鎖定最完整容器，並關閉 GPU 防止空白)
+          # 2. 建立腳本 (優化定位與渲染等待)
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
@@ -26,33 +26,31 @@ jobs:
             });
             const context = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-              viewport: { width: 1600, height: 1400 }
+              viewport: { width: 1920, height: 1080 } // 使用標準 Full HD 確保佈局正確
             });
             const page = await context.newPage();
             try {
               console.log('正在導航至圖表頁面...');
               await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 90000 });
               
-              // 模擬稍微捲動，觸發動態圖表與年份軸渲染
-              await page.evaluate(() => window.scrollTo(0, 300));
-              
-              console.log('等待圖表數據加載 (60秒)...');
+              // 模擬捲動並等待 60 秒
+              await page.evaluate(() => window.scrollTo(0, 400));
               await page.waitForTimeout(60000); 
 
-              // 【智慧定位：鎖定包含標題、數據、年份的最完整容器】
-              // 該網站通常使用 .chart-main-container 包裹所有圖表資訊
-              const selector = '.chart-main-container, .chart-container, .highcharts-container';
+              // 【智慧定位：精確鎖定圖表容器】
+              // 該網站的核心圖表位於 .highcharts-container 或 .chart-container
+              const selector = '.highcharts-container, .chart-container, #chart-container';
               const chart = await page.locator(selector).first();
               
-              console.log('執行精確區域截圖...');
+              console.log('執行精確截圖...');
               await chart.screenshot({ 
                 path: 'chart.png',
-                timeout: 0 // 防止字體載入過慢導致超時
+                timeout: 0 
               });
               console.log('截圖儲存成功！');
             } catch (e) {
-              console.error('發生錯誤，改用全螢幕快照備份:', e.message);
-              await page.screenshot({ path: 'chart.png', timeout: 0 });
+              console.error('定位失敗，截取中段區域作為備份:', e.message);
+              await page.screenshot({ path: 'chart.png', clip: { x: 260, y: 100, width: 1340, height: 850 } });
             }
             await browser.close();
           })();
@@ -63,5 +61,5 @@ jobs:
 
       - name: Post to Discord
         run: |
-          # 只發送連結網址
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"https://bitcoincounterflow.com\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          # 使用反引號 ` 包住網址，使其在 Discord 顯示為純文字，不產生連結
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"\`https://bitcoincounterflow.com\`\"}" ${{ secrets.DISCORD_WEBHOOK }}
