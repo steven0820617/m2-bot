@@ -1,4 +1,4 @@
-name: M2_Auto_Update_BotPass
+name: M2_Auto_Update_Wide
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -11,70 +11,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install
+      - name: Install Tools
         run: |
           npm install playwright
           npx playwright install chromium --with-deps
+          sudo apt-get install -y imagemagick
 
-      - name: Script
+      - name: Capture Page
         run: |
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
-            // 使用 stealth 模式的參數啟動
-            const browser = await chromium.launch({ 
-              args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'] 
-            });
-            const context = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-              viewport: { width: 1600, height: 1200 },
-              locale: 'zh-TW',
-              timezoneId: 'Asia/Taipei'
-            });
-            const page = await context.newPage();
-            
-            // 隱藏自動化標記
-            await page.addInitScript(() => {
-              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            });
-
+            const browser = await chromium.launch({ args: ['--no-sandbox', '--disable-gpu'] });
+            const page = await browser.newPage();
+            // 設定超大視窗，確保圖表橫向展開
+            await page.setViewportSize({ width: 1600, height: 1200 });
             try {
-              console.log('1. 前往網站首頁進行「預熱」...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
-              await page.waitForTimeout(5000);
-
-              console.log('2. 導向目標圖表頁面...');
-              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded', timeout: 90000 });
+              console.log('1. 前往圖表網址...');
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 90000 });
               
-              // 模擬真人的微幅捲動與滑鼠移動，觸發圖表渲染
-              console.log('3. 模擬真人行為中...');
-              await page.mouse.move(500, 500);
-              await page.evaluate(() => window.scrollTo(0, 300));
-              await page.waitForTimeout(2000);
-              await page.evaluate(() => window.scrollTo(0, 600));
-
-              console.log('4. 等待數據加載 (45秒)...');
+              // 2. 模擬稍微捲動，並等待 45 秒讓動態數據渲染
+              await page.evaluate(() => window.scrollTo(0, 150));
               await page.waitForTimeout(45000); 
-
-              // 精確定位圖表區域
-              const chart = await page.$('.chart-container') || await page.$('.highcharts-container');
-              if (chart) {
-                await chart.screenshot({ path: 'chart.png' });
-                console.log('截圖完成！');
-              } else {
-                // 如果找不到區塊，截取整個中段畫面
-                await page.screenshot({ path: 'chart.png', clip: { x: 0, y: 150, width: 1600, height: 850 } });
-              }
+              
+              // 3. 截取原始全螢幕圖
+              await page.screenshot({ path: 'full.png' });
+              console.log('原始截圖成功');
             } catch (e) {
-              await page.screenshot({ path: 'chart.png' });
+              await page.screenshot({ path: 'full.png' });
             }
             await browser.close();
           })();
           EOF
+          node screenshot.js
 
-      - name: Run
-        run: node screenshot.js
-
-      - name: Post
+      - name: Crop Large Area
         run: |
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 自動更新**\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          # 裁切出 1400x900 的大範圍，從左邊 200, 上邊 80 的位置開始
+          # 這會包含標題、完整圖表、數值標籤與時間軸
+          convert full.png -crop 1400x900+200+80 chart.png
+          echo "大範圍裁切完成"
+
+      - name: Post to Discord
+        run: |
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 每日自動更新 (大範圍版)**\"}" ${{ secrets.DISCORD_WEBHOOK }}
