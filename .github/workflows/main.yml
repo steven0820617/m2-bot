@@ -1,4 +1,4 @@
-name: M2_Auto_Update_Final_V4
+name: M2_Auto_Update_Stable_V5
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -13,34 +13,39 @@ jobs:
 
       - name: Install and Run
         run: |
-          # 1. 安裝必要組件
+          # 1. 安裝環境
           npm install playwright
           npx playwright install chromium --with-deps
           
-          # 2. 建立並執行截圖腳本 (合併在同一個步驟防止權限錯誤)
+          # 2. 建立腳本 (合併步驟以確保權限正確)
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
             const browser = await chromium.launch();
             const page = await browser.newPage();
-            // 設定大視窗確保年份不被切掉
+            // 放大視窗高度，確保底部年份能被渲染
             await page.setViewportSize({ width: 1600, height: 1400 });
             try {
-              console.log('1. 正在前往目標頁面...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded', timeout: 60000 });
+              console.log('1. 正在模擬真人進入...');
+              // 先進首頁獲得信任
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded' });
+              await page.waitForTimeout(5000);
               
-              // 解決跳轉首頁問題：如果網址不對，強制再跳一次
+              // 強行進入圖表頁面
+              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded', timeout: 90000 });
+              
+              // 解決重定向問題：如果還是首頁，強制再跳轉一次
               if (!page.url().includes('m2-global')) {
-                await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded' });
+                await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
               }
 
-              console.log('2. 等待渲染 (60秒)...');
+              console.log('2. 等待圖表完全渲染 (60秒)...');
               await page.waitForTimeout(60000); 
 
-              // 自動偵測圖表區塊 (包含標題、數據、年份)
+              // 關鍵：定位「包含標題與年份」的最外層容器
               const chart = await page.$('.chart-main-container') || await page.$('.chart-container') || await page.$('body');
               await chart.screenshot({ path: 'chart.png' });
-              console.log('截圖儲存成功！');
+              console.log('截圖成功！');
             } catch (e) {
               await page.screenshot({ path: 'chart.png' });
             }
@@ -51,5 +56,5 @@ jobs:
 
       - name: Post to Discord
         run: |
-          # 從 Secret 讀取 Webhook 網址並發送
+          # 發送到 Discord (請確保您的 DISCORD_WEBHOOK Secret 沒填錯)
           curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC**\"}" ${{ secrets.DISCORD_WEBHOOK }}
