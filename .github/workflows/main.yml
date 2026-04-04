@@ -1,4 +1,4 @@
-name: M2_Auto_Update_Stable_V5
+name: M2_Auto_Update_Link_Only
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -17,24 +17,21 @@ jobs:
           npm install playwright
           npx playwright install chromium --with-deps
           
-          # 2. 建立腳本 (合併步驟以確保權限正確)
+          # 2. 建立腳本 (確保包含標題與年份的完整容器)
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
             const browser = await chromium.launch();
             const page = await browser.newPage();
-            // 放大視窗高度，確保底部年份能被渲染
+            // 視窗高度設為 1400，確保底部年份被渲染
             await page.setViewportSize({ width: 1600, height: 1400 });
             try {
               console.log('1. 正在模擬真人進入...');
-              // 先進首頁獲得信任
               await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded' });
               await page.waitForTimeout(5000);
               
-              // 強行進入圖表頁面
               await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded', timeout: 90000 });
               
-              // 解決重定向問題：如果還是首頁，強制再跳轉一次
               if (!page.url().includes('m2-global')) {
                 await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
               }
@@ -42,19 +39,21 @@ jobs:
               console.log('2. 等待圖表完全渲染 (60秒)...');
               await page.waitForTimeout(60000); 
 
-              // 關鍵：定位「包含標題與年份」的最外層容器
+              // 智慧偵測：鎖定包含標題與年份的最外層容器
               const chart = await page.$('.chart-main-container') || await page.$('.chart-container') || await page.$('body');
               await chart.screenshot({ path: 'chart.png' });
-              console.log('截圖成功！');
+              console.log('截圖儲存成功！');
             } catch (e) {
               await page.screenshot({ path: 'chart.png' });
             }
             await browser.close();
           })();
           EOF
+          
+          # 3. 執行腳本
           node screenshot.js
 
       - name: Post to Discord
         run: |
-          # 發送到 Discord (請確保您的 DISCORD_WEBHOOK Secret 沒填錯)
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"https://bitcoincounterflow.com/charts/m2-global/"}" ${{ secrets.DISCORD_WEBHOOK }}
+          # 訊息內容僅保留網址
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"https://bitcoincounterflow.comcharts/m2-global/\"}" ${{ secrets.DISCORD_WEBHOOK }}
