@@ -1,8 +1,8 @@
 name: M2_Auto_Update
 on:
   schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
+    - cron: '50 9 * * *'  # 每天 UTC 00:00 (台灣早上 08:00) 自動執行
+  workflow_dispatch:      # 允許手動點擊測試
 
 jobs:
   screenshot:
@@ -16,28 +16,50 @@ jobs:
           npm install playwright
           npx playwright install chromium --with-deps
 
-      - name: Create Script File
+      - name: Create Screenshot Script
         run: |
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
+            // 模擬真人瀏覽器，避免被網站偵測為機器人而跳回首頁
             const browser = await chromium.launch();
-            const page = await browser.newPage();
-            await page.setViewportSize({ width: 1280, height: 1000 });
+            const context = await browser.newContext({
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              viewport: { width: 1440, height: 1080 }
+            });
+            const page = await context.newPage();
+            
             try {
-              await page.goto('https://bitcoincounterflow.com/charts/m2-global/', { waitUntil: 'networkidle', timeout: 60000 });
-              await new Promise(r => setTimeout(r, 15000)); // 等待 15 秒確保圖表渲染
-              
-              // 嘗試抓取圖表區域，若失敗則抓全網頁
+              console.log('正在前往圖表頁面...');
+              // 前往目標網址，等待網路閒置
+              await page.goto('https://bitcoincounterflow.com', { 
+                waitUntil: 'networkidle', 
+                timeout: 90000 
+              });
+
+              // 強制等待 20 秒，確保動態圖表完全渲染
+              await new Promise(r => setTimeout(r, 20000)); 
+
+              // 檢查是否還在圖表頁面，若被踢回首頁則重試一次
+              if (!page.url().includes('m2-global')) {
+                console.log('檢測到網頁跳轉，嘗試第二次進入...');
+                await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
+                await new Promise(r => setTimeout(r, 15000));
+              }
+
+              // 嘗試精確截取圖表區塊 (.chart-container)
               const chart = await page.$('.chart-container');
               if (chart) {
                 await chart.screenshot({ path: 'chart.png' });
+                console.log('成功截取圖表區域！');
               } else {
+                // 如果找不到區塊，則截取當前頁面
                 await page.screenshot({ path: 'chart.png' });
+                console.log('找不到特定區域，已截取當前畫面。');
               }
             } catch (e) {
-              console.error(e);
-              await page.screenshot({ path: 'chart.png' }); // 發生錯誤也強制截圖看狀況
+              console.error('發生錯誤:', e);
+              await page.screenshot({ path: 'chart.png' }); // 錯誤時也截一張圖留存
             }
             await browser.close();
           })();
@@ -48,4 +70,5 @@ jobs:
 
       - name: Post to Discord
         run: |
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **最新 Global M2 vs Bitcoin 圖表**\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          # 從 GitHub Secret 讀取 Webhook 網址並發送圖片
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs Bitcoin 最新圖表更新 (每日自動)**\"}" ${{ secrets.DISCORD_WEBHOOK }}
