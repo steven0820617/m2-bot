@@ -1,8 +1,10 @@
 name: M2_Auto_Update
 on:
   schedule:
-    - cron: '0 0 * * 4'
-  workflow_dispatch:
+    # 關鍵設定：每週三 UTC 23:45 啟動 (對應台灣時間週四 07:45)
+    # 提早 15 分鐘啟動是為了避開 GitHub Actions 的排隊延遲，確保能在 00:00 前進入執行狀態。
+    - cron: '27 12 * * *'
+  workflow_dispatch: # 保留手動執行按鈕，方便你隨時測試
 
 jobs:
   screenshot:
@@ -11,55 +13,80 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install and Run
+      - name: Install Dependencies
         run: |
-          npm install playwright
+          npm install playwright-chromium
           npx playwright install chromium --with-deps
           
+      - name: Run Precision Wait and Screenshot
+        run: |
           cat << 'EOF' > screenshot.js
-          const { chromium } = require('playwright');
+          const { chromium } = require('playwright-chromium');
+
+          // 【精準對時函式】
+          async function waitUntilMidnight() {
+            const now = new Date();
+            const midnight = new Date(now);
+            // 設定為下一個 UTC 00:00:00
+            midnight.setUTCHours(24, 0, 0, 0); 
+            
+            const msToWait = midnight.getTime() - now.getTime();
+            
+            // 如果距離整點還有時間（例如現在是 23:46），就進入等待
+            if (msToWait > 0 && msToWait < 1800000) { // 限制在 30 分鐘內才等待，避免手動測試時卡死
+              console.log(`[對時系統] 距離 UTC 00:00 還有 ${Math.round(msToWait/1000)} 秒，開始倒數...`);
+              await new Promise(resolve => setTimeout(resolve, msToWait));
+            }
+            console.log('[執行任務] 現在時間：' + new Date().toUTCString());
+          }
+
           (async () => {
-            const browser = await chromium.launch({ headless: true });
+            // 1. 等待到 UTC 00:00 準點
+            await waitUntilMidnight();
+
+            const browser = await chromium.launch({ 
+              headless: true,
+              args: ['--disable-blink-features=AutomationControlled']
+            });
             const context = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
               viewport: { width: 1600, height: 1200 }
             });
             const page = await context.newPage();
+            
             try {
-              console.log('1. 先進入首頁以獲得伺服器信任...');
-              await page.goto('https://bitcoincounterflow.com/', { waitUntil: 'networkidle' });
+              console.log('2. 訪問網站...');
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded' });
               await page.waitForTimeout(5000);
-
-              console.log('2. 【關鍵修正】從瀏覽器內部強行跳轉到圖表頁...');
-              // 這裡不使用 API 請求，而是直接修改瀏覽器的網址位置，模擬真人點擊
-              await page.evaluate(() => { window.location.href = 'https://bitcoincounterflow.com/charts/m2-global/'; });
+              await page.evaluate(() => { window.location.href = 'https://bitcoincounterflow.comcharts/m2-global/'; });
               
-              console.log('3. 等待頁面穩定與數據渲染 (60秒)...');
-              // 延長等待時間，確保 Canvas 繪圖完成
+              console.log('3. 等待渲染數據 (60秒)...');
               await page.waitForTimeout(60000); 
 
-              // 檢查目前網址是否正確
-              console.log('目前所在網址：' + page.url());
-
-              // 4. 定位包含標題、數據、年份的最外層容器
               const chart = await page.$('.chart-main-container') || await page.$('.chart-container') || await page.$('.highcharts-container');
-              
-              if (chart && page.url().includes('m2-global')) {
+              if (chart) {
                 await chart.screenshot({ path: 'chart.png' });
-                console.log('成功截取完整圖表區域！');
+                console.log('✅ 截圖成功');
               } else {
-                // 若定位失敗或被踢回，截取全螢幕供檢查
                 await page.screenshot({ path: 'chart.png' });
+                console.log('⚠️ 未找到容器，全螢幕截圖');
               }
             } catch (e) {
+              console.error(e);
               await page.screenshot({ path: 'chart.png' });
+            } finally {
+              await browser.close();
             }
-            await browser.close();
           })();
           EOF
           node screenshot.js
 
       - name: Post to Discord
+        if: always()
         run: |
-          # 網址前後加上 ` 符號，防止產生超連結與預覽
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"\`https://bitcoincounterflow.com/charts/m2-global/\`\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          if [ -f chart.png ]; then
+            curl -X POST \
+              -F "file=@chart.png" \
+              -F "payload_json={\"content\": \"https://bitcoincounterflow.comcharts/m2-global/\"}" \
+              ${{ secrets.DISCORD_WEBHOOK }}
+          fi
