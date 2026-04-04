@@ -1,4 +1,4 @@
-name: M2_Auto_Update_Stable
+name: M2_Auto_Update_Final
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -7,6 +7,8 @@ on:
 jobs:
   screenshot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -15,53 +17,45 @@ jobs:
         run: |
           npm install playwright
           npx playwright install chromium --with-deps
-          sudo apt-get install -y imagemagick
 
-      - name: Create Script
+      - name: Create and Run Script
         run: |
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
-            const browser = await chromium.launch({ args: ['--no-sandbox', '--disable-gpu'] });
-            const context = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-              viewport: { width: 1600, height: 1400 }
-            });
-            const page = await context.newPage();
+            const browser = await chromium.launch();
+            const page = await browser.newPage();
+            await page.setViewportSize({ width: 1600, height: 1400 });
             try {
-              console.log('1. 進入首頁建立信任...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
+              console.log('1. 正在導航至圖表頁面...');
+              // 第一次進入 (獲取信任)
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded' });
               await page.waitForTimeout(5000);
-
-              console.log('2. 強行進入圖表頁面...');
-              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
               
-              // 關鍵：如果被踢回首頁，強制再跳轉 2 次
-              for (let i = 0; i < 2; i++) {
-                if (!page.url().includes('m2-global')) {
-                  console.log('檢測到跳轉，重新導向第 ' + (i+1) + ' 次...');
-                  await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
-                  await page.waitForTimeout(10000);
-                }
+              // 第二次進入 (目標頁面)
+              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+              
+              // 如果被踢回首頁，強制再跳轉
+              if (!page.url().includes('m2-global')) {
+                await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
               }
 
-              console.log('3. 等待渲染 60 秒確保數據出現...');
+              console.log('2. 等待圖表渲染 (60秒)...');
               await page.waitForTimeout(60000); 
 
-              await page.screenshot({ path: 'full.png' });
-              console.log('截取成功！');
+              // 直接對特定區塊截圖，不使用座標裁切以防偏移
+              const chart = await page.$('.chart-main-container') || await page.$('.chart-container') || await page.$('body');
+              await chart.screenshot({ path: 'chart.png' });
+              console.log('截圖儲存成功！');
             } catch (e) {
-              await page.screenshot({ path: 'full.png' });
+              console.error('發生錯誤:', e.message);
+              await page.screenshot({ path: 'chart.png' });
             }
             await browser.close();
           })();
           EOF
+          node screenshot.js
 
-      - name: Run Script
-        run: node screenshot.js
-
-      - name: Crop and Post
+      - name: Post to Discord
         run: |
-          # 修正裁切範圍：寬 1400x 高 1100，保留頂部標題與底部年份
-          convert full.png -crop 1400x1100+200+20 chart.png
           curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC**\"}" ${{ secrets.DISCORD_WEBHOOK }}
