@@ -1,4 +1,4 @@
-name: M2_Auto_Update_Wide
+name: M2_Auto_Update_Final_V2
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -22,21 +22,35 @@ jobs:
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
+            // 模擬更完整的真人環境
             const browser = await chromium.launch({ args: ['--no-sandbox', '--disable-gpu'] });
-            const page = await browser.newPage();
-            // 設定超大視窗，確保圖表橫向展開
-            await page.setViewportSize({ width: 1600, height: 1200 });
+            const context = await browser.newContext({
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+              viewport: { width: 1600, height: 1200 }
+            });
+            const page = await context.newPage();
             try {
-              console.log('1. 前往圖表網址...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 90000 });
+              console.log('1. 先進入首頁以獲取信任...');
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
+              await page.waitForTimeout(5000);
+
+              console.log('2. 強制從瀏覽器內部切換網址...');
+              // 使用 JS 執行跳轉，避開伺服器的直接請求攔截
+              await page.evaluate(() => { window.location.href = '/charts/m2-global/'; });
               
-              // 2. 模擬稍微捲動，並等待 45 秒讓動態數據渲染
-              await page.evaluate(() => window.scrollTo(0, 150));
-              await page.waitForTimeout(45000); 
-              
-              // 3. 截取原始全螢幕圖
+              console.log('3. 等待圖表完全加載 (60秒)...');
+              // 給予極充裕的時間讓數據跑出來
+              await page.waitForTimeout(60000); 
+
+              // 檢查網址，如果還是首頁，最後再硬試一次
+              if (!page.url().includes('m2-global')) {
+                console.log('仍被跳轉，嘗試最後一次直接進入...');
+                await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
+                await page.waitForTimeout(30000);
+              }
+
               await page.screenshot({ path: 'full.png' });
-              console.log('原始截圖成功');
+              console.log('全螢幕截取成功');
             } catch (e) {
               await page.screenshot({ path: 'full.png' });
             }
@@ -47,11 +61,11 @@ jobs:
 
       - name: Crop Large Area
         run: |
-          # 裁切出 1400x900 的大範圍，從左邊 200, 上邊 80 的位置開始
-          # 這會包含標題、完整圖表、數值標籤與時間軸
-          convert full.png -crop 1400x900+200+80 chart.png
+          # 裁切中間大區塊：寬1400x高900，左偏200, 上偏100
+          # 這個範圍足夠大，通常能包住整張圖表
+          convert full.png -crop 1400x900+200+100 chart.png
           echo "大範圍裁切完成"
 
       - name: Post to Discord
         run: |
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 每日自動更新 (大範圍版)**\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 每日自動更新**\"}" ${{ secrets.DISCORD_WEBHOOK }}
