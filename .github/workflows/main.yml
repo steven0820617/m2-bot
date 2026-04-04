@@ -1,0 +1,30 @@
+name: M2_Auto_Update
+on:
+  schedule:
+    - cron: '0 * * * *' # 每小時自動執行一次
+  workflow_dispatch:   # 允許手動點擊執行
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npx playwright install chromium --with-deps
+
+      - name: Take Screenshot
+        run: |
+          # 這裡會等待 10 秒確保圖表載入完全，並只截取圖表區塊
+          npx playwright screenshot --url https://bitcoincounterflow.com --selector ".chart-container" chart.png --wait-for-timeout 10000
+
+      - name: Post to Discord
+        run: |
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **最新 Global M2 vs Bitcoin 圖表**\"}" ${{ secrets.DISCORD_WEBHOOK }}
