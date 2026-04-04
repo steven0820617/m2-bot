@@ -1,4 +1,4 @@
-name: M2_Auto_Update_FullRange
+name: M2_Auto_Update_Final_Fixed
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -22,24 +22,42 @@ jobs:
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
-            const browser = await chromium.launch({ args: ['--no-sandbox', '--disable-gpu'] });
-            const page = await browser.newPage();
-            // 增加視窗高度，確保底部年份能被渲染
-            await page.setViewportSize({ width: 1600, height: 1400 });
+            // 關鍵修正：加入 --disable-gpu 等參數，解決虛擬機截圖空白問題
+            const browser = await chromium.launch({ 
+              args: [
+                '--no-sandbox', 
+                '--disable-gpu', 
+                '--disable-software-rasterizer',
+                '--disable-dev-shm-usage'
+              ] 
+            });
+            const context = await browser.newContext({
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+              viewport: { width: 1600, height: 1400 }
+            });
+            const page = await context.newPage();
             try {
-              console.log('1. 進入首頁...');
+              console.log('1. 進入首頁建立連線...');
               await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
               await page.waitForTimeout(5000);
 
-              console.log('2. 切換至圖表頁...');
+              console.log('2. 前往圖表頁面...');
               await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'networkidle', timeout: 90000 });
               
-              // 3. 關鍵：稍微捲動並等待 60 秒，確保所有數據線條與年份刻度畫出來
-              await page.evaluate(() => window.scrollTo(0, 50)); 
+              // 3. 解決空白問題：模擬捲動以觸發 Canvas 渲染
+              await page.evaluate(() => window.scrollTo(0, 300));
+              
+              console.log('3. 等待圖表完全渲染 (60秒)...');
               await page.waitForTimeout(60000); 
 
+              // 如果被踢回首頁，強制再跳轉一次
+              if (!page.url().includes('m2-global')) {
+                await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
+                await page.waitForTimeout(30000);
+              }
+
               await page.screenshot({ path: 'full.png' });
-              console.log('原始全截取成功');
+              console.log('截取成功！');
             } catch (e) {
               await page.screenshot({ path: 'full.png' });
             }
@@ -50,12 +68,10 @@ jobs:
 
       - name: Crop Full Area
         run: |
-          # 修正裁切範圍：
-          # 寬 1400x 高 1000 (增加高度以包含年份)
-          # 左偏 200, 上偏 20 (向上移動以包含頂部數據)
-          convert full.png -crop 1400x1000+200+20 chart.png
+          # 修正裁切：寬1400x高1100，從左偏200, 上偏20開始 (保留標題與年份)
+          convert full.png -crop 1400x1100+200+20 chart.png
           echo "完整範圍裁切完成"
 
       - name: Post to Discord
         run: |
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 每日更新 (完整數據版)**\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC**\"}" ${{ secrets.DISCORD_WEBHOOK }}
