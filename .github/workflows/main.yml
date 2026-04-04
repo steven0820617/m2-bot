@@ -12,7 +12,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: setup-python@v4
+        uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
@@ -35,33 +35,26 @@ jobs:
           options.add_argument('--no-sandbox')
           options.add_argument('--disable-gpu')
           options.add_argument('--window-size=1600,1400')
-          # 關鍵：隱藏自動化特徵，防止跳回首頁
           options.add_argument('--disable-blink-features=AutomationControlled')
           options.add_experimental_option("excludeSwitches", ["enable-automation"])
           options.add_experimental_option('useAutomationExtension', False)
 
           driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-          # 徹底移除 webdriver 標記
           driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
             "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
           })
 
           try:
-              print("1. 先去首頁混淆視聽...")
+              print("1. 正在模擬真人進入頁面...")
               driver.get('https://bitcoincounterflow.com')
-              time.sleep(5)
+              time.sleep(10)
               
-              print("2. 強制跳轉至圖表頁...")
-              driver.get('https://bitcoincounterflow.comcharts/m2-global/')
-              
-              print("3. 等待渲染 (60s)...")
-              time.sleep(60)
-              
-              # 再次確認網址，如果還是首頁，就再試一次
+              # 如果被跳轉回首頁，強制再跳轉一次
               if "m2-global" not in driver.current_url:
-                  print("檢測到跳轉，執行二次重導...")
-                  driver.get('https://bitcoincounterflow.comcharts/m2-global/')
-                  time.sleep(30)
+                  driver.get('https://bitcoincounterflow.com')
+              
+              print("2. 等待數據繪製 (60s)...")
+              time.sleep(60)
               
               driver.save_screenshot('full.png')
               print("截圖成功！")
@@ -71,6 +64,6 @@ jobs:
 
       - name: Crop and Post
         run: |
-          # 裁切中間大區塊：寬1400x高1100，左偏200, 上偏20 (包含標題、數據、年份)
+          # 裁切：寬1400x高1100，從左偏200, 上偏20 (包含標題、數據、年份)
           convert full.png -crop 1400x1100+200+20 chart.png
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC**\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 每日圖表更新**\"}" ${{ secrets.DISCORD_WEBHOOK }}
