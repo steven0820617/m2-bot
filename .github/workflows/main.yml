@@ -1,4 +1,4 @@
-name: M2_Auto_Update
+name: M2_Auto_Update_BotPass
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -21,45 +21,49 @@ jobs:
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
-            // 關鍵 1：關閉硬體加速，解決空白截圖問題
+            // 使用 stealth 模式的參數啟動
             const browser = await chromium.launch({ 
-              args: ['--disable-gpu', '--disable-software-rasterizer', '--no-sandbox'] 
+              args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'] 
             });
             const context = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-              viewport: { width: 1600, height: 1200 }
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+              viewport: { width: 1600, height: 1200 },
+              locale: 'zh-TW',
+              timezoneId: 'Asia/Taipei'
             });
             const page = await context.newPage();
             
+            // 隱藏自動化標記
+            await page.addInitScript(() => {
+              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            });
+
             try {
-              console.log('1. 前往圖表頁面...');
-              await page.goto('https://bitcoincounterflow.com', { 
-                waitUntil: 'networkidle', 
-                timeout: 90000 
-              });
+              console.log('1. 前往網站首頁進行「預熱」...');
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
+              await page.waitForTimeout(5000);
 
-              // 關鍵 2：解決跳回首頁問題 (若網址不對，強制再跳一次)
-              if (!page.url().includes('m2-global')) {
-                console.log('偵測到跳轉，重新導向目標頁面...');
-                await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
-              }
-
-              // 關鍵 3：模擬捲動觸發渲染
-              await page.evaluate(() => window.scrollTo(0, 400));
+              console.log('2. 導向目標圖表頁面...');
+              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded', timeout: 90000 });
               
-              console.log('2. 等待圖表完全渲染 (45秒)...');
+              // 模擬真人的微幅捲動與滑鼠移動，觸發圖表渲染
+              console.log('3. 模擬真人行為中...');
+              await page.mouse.move(500, 500);
+              await page.evaluate(() => window.scrollTo(0, 300));
+              await page.waitForTimeout(2000);
+              await page.evaluate(() => window.scrollTo(0, 600));
+
+              console.log('4. 等待數據加載 (45秒)...');
               await page.waitForTimeout(45000); 
 
-              // 關鍵 4：精確捕捉包含標題與數據的圖表區塊
-              const selector = '.chart-main-container, .chart-container';
-              const chart = await page.$(selector);
-              
+              // 精確定位圖表區域
+              const chart = await page.$('.chart-container') || await page.$('.highcharts-container');
               if (chart) {
                 await chart.screenshot({ path: 'chart.png' });
-                console.log('成功截取圖表區塊！');
+                console.log('截圖完成！');
               } else {
-                // 備份方案：截取網頁中央區域
-                await page.screenshot({ path: 'chart.png', clip: { x: 0, y: 100, width: 1600, height: 900 } });
+                // 如果找不到區塊，截取整個中段畫面
+                await page.screenshot({ path: 'chart.png', clip: { x: 0, y: 150, width: 1600, height: 850 } });
               }
             } catch (e) {
               await page.screenshot({ path: 'chart.png' });
@@ -73,4 +77,4 @@ jobs:
 
       - name: Post
         run: |
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 最新圖表更新**\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 自動更新**\"}" ${{ secrets.DISCORD_WEBHOOK }}
