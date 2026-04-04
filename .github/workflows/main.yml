@@ -1,4 +1,4 @@
-name: M2_Auto_Update_Link_Only
+name: M2_Auto_Update_Final_V9
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -17,34 +17,42 @@ jobs:
           npm install playwright
           npx playwright install chromium --with-deps
           
-          # 2. 建立腳本 (確保包含標題與年份的完整容器)
+          # 2. 建立腳本 (鎖定最完整容器，並關閉 GPU 防止空白)
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
-            const browser = await chromium.launch();
-            const page = await browser.newPage();
-            // 視窗高度設為 1400，確保底部年份被渲染
-            await page.setViewportSize({ width: 1600, height: 1400 });
+            const browser = await chromium.launch({ 
+              args: ['--no-sandbox', '--disable-gpu', '--disable-software-rasterizer'] 
+            });
+            const context = await browser.newContext({
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+              viewport: { width: 1600, height: 1400 }
+            });
+            const page = await context.newPage();
             try {
-              console.log('1. 正在模擬真人進入...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded' });
-              await page.waitForTimeout(5000);
+              console.log('正在導航至圖表頁面...');
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 90000 });
               
-              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded', timeout: 90000 });
+              // 模擬稍微捲動，觸發動態圖表與年份軸渲染
+              await page.evaluate(() => window.scrollTo(0, 300));
               
-              if (!page.url().includes('m2-global')) {
-                await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
-              }
-
-              console.log('2. 等待圖表完全渲染 (60秒)...');
+              console.log('等待圖表數據加載 (60秒)...');
               await page.waitForTimeout(60000); 
 
-              // 智慧偵測：鎖定包含標題與年份的最外層容器
-              const chart = await page.$('.chart-main-container') || await page.$('.chart-container') || await page.$('body');
-              await chart.screenshot({ path: 'chart.png' });
+              // 【智慧定位：鎖定包含標題、數據、年份的最完整容器】
+              // 該網站通常使用 .chart-main-container 包裹所有圖表資訊
+              const selector = '.chart-main-container, .chart-container, .highcharts-container';
+              const chart = await page.locator(selector).first();
+              
+              console.log('執行精確區域截圖...');
+              await chart.screenshot({ 
+                path: 'chart.png',
+                timeout: 0 // 防止字體載入過慢導致超時
+              });
               console.log('截圖儲存成功！');
             } catch (e) {
-              await page.screenshot({ path: 'chart.png' });
+              console.error('發生錯誤，改用全螢幕快照備份:', e.message);
+              await page.screenshot({ path: 'chart.png', timeout: 0 });
             }
             await browser.close();
           })();
@@ -55,5 +63,5 @@ jobs:
 
       - name: Post to Discord
         run: |
-          # 訊息內容僅保留網址
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"https://bitcoincounterflow.comcharts/m2-global/\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          # 只發送連結網址
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"https://bitcoincounterflow.com\"}" ${{ secrets.DISCORD_WEBHOOK }}
