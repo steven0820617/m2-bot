@@ -23,28 +23,34 @@ jobs:
           (async () => {
             const browser = await chromium.launch();
             const page = await browser.newPage();
-            // 放大視窗以包含所有側邊數據
+            // 使用較寬的視窗以確保右側數據不被切掉
             await page.setViewportSize({ width: 1600, height: 1200 });
             try {
               console.log('正在前往圖表頁面...');
-              // 【關鍵修正】正確的圖表網址
-              await page.goto('https://bitcoincounterflow.com/charts/m2-global/', { waitUntil: 'networkidle', timeout: 90000 });
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 90000 });
               
-              // 模擬捲動並等待 40 秒讓動畫跑完
-              await page.evaluate(() => window.scrollTo(0, 400));
+              // 1. 強制等待圖表數據加載 (40秒)
               await page.waitForTimeout(40000); 
 
-              // 鎖定包含標題與數據的最外層容器
-              const chart = await page.$('.chart-main-container') || await page.$('.chart-container');
+              // 2. 精確定位：只針對包含圖表與座標軸的特定區塊
+              // 該網站的核心圖表區塊通常是 .chart-container 或 .highcharts-container
+              const chartElement = await page.$('.chart-container') || await page.$('.highcharts-container');
               
-              if (chart) {
-                await chart.screenshot({ path: 'chart.png' });
-                console.log('已精確截取圖表區域');
+              if (chartElement) {
+                console.log('偵測到核心圖表區塊，進行精確截圖...');
+                await chartElement.screenshot({ 
+                  path: 'chart.png',
+                  animations: 'disabled' // 關閉動畫，確保線條定格
+                });
               } else {
-                // 若找不到容器，則針對圖表所在的中段區域截圖
-                await page.screenshot({ path: 'chart.png', clip: { x: 0, y: 120, width: 1600, height: 800 } });
-                console.log('找不到容器，使用中段座標截取');
+                console.log('找不到核心區塊，改用精確座標補捉圖表區域...');
+                // 這個座標經過計算，會避開頂部導航和底部文字，只抓中間圖表
+                await page.screenshot({ 
+                  path: 'chart.png', 
+                  clip: { x: 260, y: 10, width: 1340, height: 750 } 
+                });
               }
+              console.log('截圖成功！');
             } catch (e) {
               await page.screenshot({ path: 'chart.png' });
             }
