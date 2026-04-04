@@ -11,31 +11,40 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           npm install playwright
           npx playwright install chromium --with-deps
 
-      - name: Run Screenshot Script
+      - name: Create Script File
         run: |
-          node -e "
+          cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
             const browser = await chromium.launch();
             const page = await browser.newPage();
             await page.setViewportSize({ width: 1280, height: 1000 });
-            await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
-            await new Promise(r => setTimeout(r, 10000)); // 等待圖表加載
-            
-            // 找到圖表區塊並截圖
-            const chart = await page.$('.chart-container');
-            if (chart) {
-              await chart.screenshot({ path: 'chart.png' });
-            } else {
-              await page.screenshot({ path: 'chart.png', fullPage: true });
+            try {
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 60000 });
+              await new Promise(r => setTimeout(r, 15000)); // 等待 15 秒確保圖表渲染
+              
+              // 嘗試抓取圖表區域，若失敗則抓全網頁
+              const chart = await page.$('.chart-container');
+              if (chart) {
+                await chart.screenshot({ path: 'chart.png' });
+              } else {
+                await page.screenshot({ path: 'chart.png' });
+              }
+            } catch (e) {
+              console.error(e);
+              await page.screenshot({ path: 'chart.png' }); // 發生錯誤也強制截圖看狀況
             }
             await browser.close();
-          })();"
+          })();
+          EOF
+
+      - name: Run Screenshot Script
+        run: node screenshot.js
 
       - name: Post to Discord
         run: |
