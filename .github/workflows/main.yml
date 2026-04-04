@@ -11,30 +11,31 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Playwright
-        run: npx playwright install chromium --with-deps
-
-      - name: Create Screenshot Script
+      - name: Install dependencies
         run: |
-          echo "const { chromium } = require('playwright');
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: Run Screenshot Script
+        run: |
+          node -e "
+          const { chromium } = require('playwright');
           (async () => {
             const browser = await chromium.launch();
             const page = await browser.newPage();
-            await page.setViewportSize({ width: 1280, height: 800 });
-            await page.goto('https://bitcoincounterflow.com');
-            await page.waitForTimeout(10000); // 等待圖表跑出來
-            const element = await page.$('.chart-container');
-            await element.screenshot({ path: 'chart.png' });
+            await page.setViewportSize({ width: 1280, height: 1000 });
+            await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
+            await new Promise(r => setTimeout(r, 10000)); // 等待圖表加載
+            
+            // 找到圖表區塊並截圖
+            const chart = await page.$('.chart-container');
+            if (chart) {
+              await chart.screenshot({ path: 'chart.png' });
+            } else {
+              await page.screenshot({ path: 'chart.png', fullPage: true });
+            }
             await browser.close();
-          })();" > screenshot.js
-
-      - name: Run Screenshot Script
-        run: node screenshot.js
+          })();"
 
       - name: Post to Discord
         run: |
