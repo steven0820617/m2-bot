@@ -24,22 +24,22 @@ jobs:
             const browser = await chromium.launch({ headless: true });
             const context = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-              viewport: { width: 1600, height: 1200 }
+              viewport: { width: 1440, height: 1080 }
             });
             const page = await context.newPage();
             try {
-              console.log('1. 進入首頁...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
-              await page.waitForTimeout(5000);
-              console.log('2. 跳轉圖表頁...');
-              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'networkidle' });
-              console.log('3. 等待渲染 (30秒)...');
-              await page.waitForTimeout(30000);
-              // 直接針對網頁中段截圖，避開找不到元件的問題
-              await page.screenshot({ path: 'chart.png', clip: { x: 0, y: 200, width: 1600, height: 800 } });
-              console.log('截圖完成！');
+              console.log('1. 導向目標頁面...');
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle', timeout: 90000 });
+              
+              console.log('2. 等待圖表元件...');
+              const chart = page.locator('.chart-container, .highcharts-container').first();
+              await chart.waitFor({ state: 'visible', timeout: 30000 });
+              await page.waitForTimeout(5000); // 確保動畫跑完
+
+              console.log('3. 精確截取圖表區塊...');
+              await chart.screenshot({ path: 'chart.png' });
             } catch (e) {
-              console.error(e);
+              console.error('偵測失敗:', e);
               await page.screenshot({ path: 'chart.png' });
             }
             await browser.close();
@@ -51,4 +51,4 @@ jobs:
 
       - name: Post to Discord
         run: |
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 最新圖表**\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📊 **Global M2 vs BTC 最新圖表更新**\"}" ${{ secrets.DISCORD_WEBHOOK }}
