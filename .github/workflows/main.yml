@@ -1,4 +1,4 @@
-name: M2_Auto_Update_Final_Fixed
+name: M2_Auto_Update_Final_V3
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -22,14 +22,8 @@ jobs:
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
-            // 關鍵修正：加入 --disable-gpu 等參數，解決虛擬機截圖空白問題
             const browser = await chromium.launch({ 
-              args: [
-                '--no-sandbox', 
-                '--disable-gpu', 
-                '--disable-software-rasterizer',
-                '--disable-dev-shm-usage'
-              ] 
+              args: ['--no-sandbox', '--disable-gpu'] 
             });
             const context = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
@@ -37,29 +31,28 @@ jobs:
             });
             const page = await context.newPage();
             try {
-              console.log('1. 進入首頁建立連線...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'networkidle' });
-              await page.waitForTimeout(5000);
+              console.log('1. 快速進入網頁...');
+              // 使用 domcontentloaded 縮短等待時間
+              await page.goto('https://bitcoincounterflow.com', { 
+                waitUntil: 'domcontentloaded', 
+                timeout: 60000 
+              });
 
-              console.log('2. 前往圖表頁面...');
-              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'networkidle', timeout: 90000 });
-              
-              // 3. 解決空白問題：模擬捲動以觸發 Canvas 渲染
-              await page.evaluate(() => window.scrollTo(0, 300));
-              
-              console.log('3. 等待圖表完全渲染 (60秒)...');
-              await page.waitForTimeout(60000); 
-
-              // 如果被踢回首頁，強制再跳轉一次
+              // 2. 二次檢查，如果被踢回首頁，強制跳轉
               if (!page.url().includes('m2-global')) {
-                await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
-                await page.waitForTimeout(30000);
+                await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded' });
               }
 
-              await page.screenshot({ path: 'full.png' });
-              console.log('截取成功！');
+              // 3. 給予 40 秒讓動態數據線條畫出來（這部分不能省）
+              console.log('等待數據繪製 (40s)...');
+              await page.waitForTimeout(40000); 
+
+              // 4. 關鍵：設定截圖超時為 0 (無視字體載入)
+              await page.screenshot({ path: 'full.png', timeout: 0 });
+              console.log('截圖儲存成功！');
             } catch (e) {
-              await page.screenshot({ path: 'full.png' });
+              console.error('報錯:', e.message);
+              await page.screenshot({ path: 'full.png', timeout: 0 });
             }
             await browser.close();
           })();
@@ -68,7 +61,7 @@ jobs:
 
       - name: Crop Full Area
         run: |
-          # 修正裁切：寬1400x高1100，從左偏200, 上偏20開始 (保留標題與年份)
+          # 裁切：寬1400x高1100，左偏200, 上偏20 (包含標題、數據、年份)
           convert full.png -crop 1400x1100+200+20 chart.png
           echo "完整範圍裁切完成"
 
