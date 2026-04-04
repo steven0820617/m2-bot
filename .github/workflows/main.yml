@@ -1,8 +1,8 @@
 name: M2_Auto_Update
 on:
   schedule:
-    - cron: '0 * * * *' # 每小時自動執行一次
-  workflow_dispatch:   # 允許手動點擊執行
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   screenshot:
@@ -17,13 +17,24 @@ jobs:
           node-version: '20'
 
       - name: Install Playwright
-        run: |
-          npx playwright install chromium --with-deps
+        run: npx playwright install chromium --with-deps
 
-      - name: Take Screenshot
+      - name: Create Screenshot Script
         run: |
-          # 這裡會等待 10 秒確保圖表載入完全，並只截取圖表區塊
-          npx playwright screenshot --url https://bitcoincounterflow.com --selector ".chart-container" chart.png --wait-for-timeout 10000
+          echo "const { chromium } = require('playwright');
+          (async () => {
+            const browser = await chromium.launch();
+            const page = await browser.newPage();
+            await page.setViewportSize({ width: 1280, height: 800 });
+            await page.goto('https://bitcoincounterflow.com');
+            await page.waitForTimeout(10000); // 等待圖表跑出來
+            const element = await page.$('.chart-container');
+            await element.screenshot({ path: 'chart.png' });
+            await browser.close();
+          })();" > screenshot.js
+
+      - name: Run Screenshot Script
+        run: node screenshot.js
 
       - name: Post to Discord
         run: |
