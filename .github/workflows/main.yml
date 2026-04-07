@@ -25,34 +25,47 @@ jobs:
               viewport: { width: 1600, height: 1200 }
             });
             const page = await context.newPage();
+            
+            // 【修正 1】將預設 30 秒超時延長至 90 秒，避免 GitHub 網路波動
+            page.setDefaultTimeout(90000);
+
             try {
-              console.log('1. 先進入首頁以獲得伺服器信任...');
-              await page.goto('https://bitcoincounterflow.com/', { waitUntil: 'networkidle' });
+              console.log('1. 進入首頁...');
+              // 【修正 2】改用 domcontentloaded，不強制死等所有背景廣告/字體載入完畢
+              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded' });
               await page.waitForTimeout(5000);
 
-              console.log('2. 【關鍵修正】從瀏覽器內部強行跳轉到圖表頁...');
-              // 這裡不使用 API 請求，而是直接修改瀏覽器的網址位置，模擬真人點擊
-              await page.evaluate(() => { window.location.href = 'https://bitcoincounterflow.com/charts/m2-global/'; });
+              console.log('2. 跳轉到圖表頁...');
+              await page.evaluate(() => { window.location.href = 'https://bitcoincounterflow.comcharts/m2-global/'; });
               
               console.log('3. 等待頁面穩定與數據渲染 (60秒)...');
-              // 延長等待時間，確保 Canvas 繪圖完成
               await page.waitForTimeout(60000); 
 
-              // 檢查目前網址是否正確
+              // 【修正 3】注入 CSS 解決 "waiting for fonts to load" 的卡死問題
+              await page.addStyleTag({ 
+                content: `* { font-family: sans-serif !important; transition: none !important; animation: none !important; }` 
+              });
+
               console.log('目前所在網址：' + page.url());
 
-              // 4. 定位包含標題、數據、年份的最外層容器
               const chart = await page.$('.chart-main-container') || await page.$('.chart-container') || await page.$('.highcharts-container');
               
               if (chart && page.url().includes('m2-global')) {
-                await chart.screenshot({ path: 'chart.png' });
+                // 【修正 4】截圖時禁用動畫等待，防止無限期等待渲染
+                await chart.screenshot({ path: 'chart.png', animations: 'disabled' });
                 console.log('成功截取完整圖表區域！');
               } else {
-                // 若定位失敗或被踢回，截取全螢幕供檢查
-                await page.screenshot({ path: 'chart.png' });
+                await page.screenshot({ path: 'chart.png', animations: 'disabled' });
+                console.log('未找到特定容器，截取全螢幕供檢查。');
               }
             } catch (e) {
-              await page.screenshot({ path: 'chart.png' });
+              console.error('執行過程中發生錯誤:', e.message);
+              // 保底截圖：即便失敗也嘗試抓一張圖，並設定極短超時避免 Workflow 永久掛載
+              try {
+                await page.screenshot({ path: 'chart.png', animations: 'disabled', timeout: 10000 });
+              } catch (err) {
+                console.error('保底截圖亦失敗');
+              }
             }
             await browser.close();
           })();
@@ -60,6 +73,10 @@ jobs:
           node screenshot.js
 
       - name: Post to Discord
+        if: always() # 確保即便前面的步驟報錯，也能嘗試發送截圖（或錯誤提示）
         run: |
-          # 網址前後加上 ` 符號，防止產生超連結與預覽
-          curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"\`https://bitcoincounterflow.com/charts/m2-global/\`\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          if [ -f chart.png ]; then
+            curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"\`https://bitcoincounterflow.comcharts/m2-global/\`\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          else
+            curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"❌ M2 自動更新失敗：截圖超時或無法產生檔案。\"}" ${{ secrets.DISCORD_WEBHOOK }}
+          fi
