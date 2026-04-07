@@ -1,4 +1,5 @@
 name: M2_Auto_Update
+
 on:
   schedule:
     - cron: '0 0 * * 2'
@@ -7,81 +8,92 @@ on:
 jobs:
   screenshot:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install and Run
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install Playwright
         run: |
-          npm install playwright
-          npx playwright install chromium --with-deps
-          
-          cat << 'EOF' > screenshot.js
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Capture screenshot
+        env:
+          TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
+        run: |
+          cat > screenshot.js <<'EOF'
           const { chromium } = require('playwright');
+          const fs = require('fs');
+
           (async () => {
-            // 1. 強制設定為 2K 解析度 (2560x1440)，確保網頁佈局完全展開成大圖模式
             const browser = await chromium.launch({ headless: true });
             const context = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-              viewport: { width: 2560, height: 1440 },
-              deviceScaleFactor: 2 
+              viewport: { width: 1920, height: 1080 },
+              deviceScaleFactor: 2,
+              locale: 'zh-TW',
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
             });
+
             const page = await context.newPage();
-            page.setDefaultTimeout(90000);
+            page.setDefaultTimeout(60000);
 
             try {
-              console.log('1. 直接進入圖表頁...');
-              await page.goto('https://bitcoincounterflow.com', { 
-                waitUntil: 'networkidle' 
+              await page.goto(process.env.TARGET_URL, {
+                waitUntil: 'domcontentloaded',
+                timeout: 60000
               });
 
-              console.log('2. 注入 CSS 強制修復佈局並隱藏廣告彈窗...');
-              await page.addStyleTag({ 
-                content: `
-                  /* 隱藏 Cookie 彈窗與不需要的側邊欄位，防止干擾截圖 */
-                  .qc-cmp2-container, #qc-cmp2-container, .sidebar, .nav-menu { display: none !important; }
-                  /* 強制主要圖表區域撐開，不要並排顯示 */
-                  .chart-main-container { width: 100% !important; max-width: none !important; display: block !important; }
-                  * { font-family: sans-serif !important; }
-                ` 
+              await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {});
+              await page.waitForTimeout(5000);
+
+              await page.screenshot({
+                path: 'chart.png',
+                fullPage: true,
+                animations: 'disabled',
+                caret: 'hide'
               });
 
-              console.log('3. 等待 Highcharts 線條動畫與 Canvas 渲染...');
-              // 鎖定該網站最外層的圖表包裝盒
-              const selector = '.chart-main-container';
-              await page.waitForSelector(selector, { state: 'visible', timeout: 30000 });
-              
-              // 延長等待時間至 25 秒，確保所有國家的 M2 數據線條都畫完
-              await page.waitForTimeout(25000);
-
-              // 4. 執行精確截圖
-              const chart = await page.$(selector);
-              if (chart) {
-                // 將滑鼠移到角落，避免觸發任何 Tooltip 擋住線條
-                await page.mouse.move(0, 0); 
-                await chart.screenshot({ 
-                  path: 'chart.png', 
-                  animations: 'disabled' 
-                });
-                console.log('成功擷取完整比例圖表！');
-              } else {
-                throw new Error('找不到圖表容器');
+              if (!fs.existsSync('chart.png')) {
+                throw new Error('chart.png not created');
               }
-            } catch (e) {
-              console.error('報錯偵錯：' + e.message);
-              // 失敗時抓全螢幕協助判斷原因
-              await page.screenshot({ path: 'chart.png', fullPage: true });
+            } catch (err) {
+              console.error('Screenshot failed:', err);
+
+              await page.screenshot({
+                path: 'chart.png',
+                fullPage: true,
+                animations: 'disabled',
+                caret: 'hide'
+              });
+            } finally {
+              await browser.close();
             }
-            await browser.close();
           })();
           EOF
+
           node screenshot.js
 
-      - name: Post to Discord
+      - name: Send to Discord
         if: always()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          if [ -f chart.png ]; then
-            curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📈 **M2 Global Supply Growth 報告**\n\`https://bitcoincounterflow.com\`\"}" ${{ secrets.DISCORD_WEBHOOK }}
-          else
-            echo "找不到截圖。"
+          set -euo pipefail
+
+          if [ ! -f chart.png ]; then
+            echo "chart.png 不存在"
+            exit 1
           fi
+
+          curl --fail-with-body -sS \
+            -F "file=@chart.png" \
+            -F 'payload_json={"content":"https://bitcoincounterflow.com/charts/m2-global/"}' \
+            "$DISCORD_WEBHOOK"
