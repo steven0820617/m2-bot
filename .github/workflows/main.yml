@@ -2,7 +2,7 @@ name: M2_Auto_Update
 
 on:
   schedule:
-    - cron: '0 0 * * 2' # 每週二 台北時間 08:00
+    - cron: '0 0 * * 2'
   workflow_dispatch:
 
 jobs:
@@ -30,7 +30,6 @@ jobs:
         run: |
           cat > screenshot.js <<'EOF'
           const { chromium } = require('playwright');
-          const fs = require('fs');
 
           (async () => {
             const browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage'] });
@@ -47,40 +46,27 @@ jobs:
               page = await context.newPage();
               page.setDefaultTimeout(90000);
 
-              console.log('1. 前往目標頁面:', process.env.TARGET_URL);
+              console.log('1. 前往頁面...');
               await page.goto(process.env.TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
-              console.log('2. 等待圖表元件出現...');
-              const selector = '.chart-main-container';
-              // Non-blocking 等待：若找不到元件不崩潰，返回 null
-              const chartExists = await page.waitForSelector(selector, { state: 'visible', timeout: 25000 })
-                .catch(() => null);
-
-              // 額外等待確保 Highcharts 數據渲染
-              await page.waitForTimeout(15000);
+              // 【關鍵修正】確保圖表完全載入並等待渲染完成
+              const selector = '.chart-main-container'; 
+              await page.waitForSelector(selector, { state: 'visible', timeout: 30000 }).catch(() => null);
+              await page.waitForTimeout(30000); // 增加等待時間至 30 秒，確保所有線條動畫跑完
 
               const chart = await page.$(selector);
-              if (chart && chartExists) {
-                console.log('3. 執行局部圖表截圖...');
-                await page.mouse.move(0, 0);
-                await chart.screenshot({ path: OUT, animations: 'disabled' });
+              if (chart) {
+                console.log('3. 執行精確局部截圖...');
+                await page.mouse.move(0, 0); // 移開滑鼠避免 Tooltip 
+                // 【關鍵參數】使用 chart.screenshot 且不帶其餘參數，這會精確抓取該 HTML 元素範圍
+                await chart.screenshot({ path: OUT });
               } else {
-                console.log('3. 找不到容器，執行流程內保底截圖...');
-                await page.screenshot({ path: OUT, fullPage: true, animations: 'disabled' });
+                console.log('3. 找不到容器，保底全螢幕截圖...');
+                await page.screenshot({ path: OUT, fullPage: true });
               }
-              console.log('流程順利完成。');
 
             } catch (err) {
-              console.error('執行過程中發生嚴重錯誤:', err);
-              // 【最終保險修正】若上述流程完全爆掉，嘗試在退出前抓一張全螢幕圖
-              if (page) {
-                try {
-                  await page.screenshot({ path: OUT, fullPage: true, animations: 'disabled' });
-                  console.log('Final exception fallback screenshot taken.');
-                } catch (e) {
-                  console.error('Final fallback failed.');
-                }
-              }
+              if (page) await page.screenshot({ path: OUT, fullPage: true }).catch(() => {});
               process.exit(1);
             } finally {
               await browser.close();
@@ -97,12 +83,11 @@ jobs:
           TARGET_URL: https://bitcoincounterflow.com
         run: |
           if [ -s chart.png ]; then
-            # 使用 < > 包圍網址：可點擊，但強行關閉 Discord 的網頁預覽卡片
+            # 使用 < > 包圍網址，確保純網址無預覽
             curl --fail-with-body -sS \
               -F "file=@chart.png" \
               -F "payload_json={\"content\":\"<${{ env.TARGET_URL }}>\"}" \
               "$DISCORD_WEBHOOK"
           else
-            echo "錯誤：找不到截圖檔案，跳過發送。"
             exit 1
           fi
