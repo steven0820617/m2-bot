@@ -33,64 +33,53 @@ jobs:
           const fs = require('fs');
 
           (async () => {
-            const browser = await chromium.launch({
-              headless: true,
-              args: ['--disable-dev-shm-usage']
-            });
-
+            const browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage'] });
             const OUT = 'chart.png';
+            let page;
 
             try {
               const context = await browser.newContext({
                 viewport: { width: 1920, height: 1080 },
                 deviceScaleFactor: 2,
-                locale: 'zh-TW',
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
               });
 
-              const page = await context.newPage();
+              page = await context.newPage();
               page.setDefaultTimeout(90000);
 
-              console.log('1. Opening URL...');
-              // 【優化 1】改用 domcontentloaded 配合長等待，避免 networkidle 過早觸發
-              await page.goto(process.env.TARGET_URL, {
-                waitUntil: 'domcontentloaded',
-                timeout: 90000
-              });
+              console.log('1. 前往目標頁面:', process.env.TARGET_URL);
+              await page.goto(process.env.TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
-              console.log('2. Waiting for Highcharts rendering (25s)...');
-              await page.waitForTimeout(25000);
-
+              console.log('2. 等待圖表元件出現...');
               const selector = '.chart-main-container';
-              const chartExists = await page.waitForSelector(selector, { state: 'visible', timeout: 15000 })
-                .catch(() => {
-                  console.log('Selector not found, switching to full page fallback.');
-                  return null;
-                });
+              // Non-blocking 等待：若找不到元件不崩潰，返回 null
+              const chartExists = await page.waitForSelector(selector, { state: 'visible', timeout: 25000 })
+                .catch(() => null);
+
+              // 額外等待確保 Highcharts 數據渲染
+              await page.waitForTimeout(15000);
 
               const chart = await page.$(selector);
               if (chart && chartExists) {
-                console.log('3. Capturing element screenshot...');
+                console.log('3. 執行局部圖表截圖...');
                 await page.mouse.move(0, 0);
                 await chart.screenshot({ path: OUT, animations: 'disabled' });
               } else {
-                console.log('3. Capturing full page screenshot...');
+                console.log('3. 找不到容器，執行流程內保底截圖...');
                 await page.screenshot({ path: OUT, fullPage: true, animations: 'disabled' });
               }
-
-              console.log('Success.');
+              console.log('流程順利完成。');
 
             } catch (err) {
-              console.error('Pipeline failed:', err);
-              // 【優化 2】最後保底截圖：即便腳本報錯，也嘗試抓一張全螢幕圖發送
-              try {
-                const page = (await browser.pages())[0];
-                if (page) {
+              console.error('執行過程中發生嚴重錯誤:', err);
+              // 【最終保險修正】若上述流程完全爆掉，嘗試在退出前抓一張全螢幕圖
+              if (page) {
+                try {
                   await page.screenshot({ path: OUT, fullPage: true, animations: 'disabled' });
-                  console.log('Final fallback screenshot taken.');
+                  console.log('Final exception fallback screenshot taken.');
+                } catch (e) {
+                  console.error('Final fallback failed.');
                 }
-              } catch (e) {
-                console.error('Final fallback failed.');
               }
               process.exit(1);
             } finally {
@@ -108,12 +97,12 @@ jobs:
           TARGET_URL: https://bitcoincounterflow.com
         run: |
           if [ -s chart.png ]; then
-            # 發送純網址內容
+            # 使用 < > 包圍網址：可點擊，但強行關閉 Discord 的網頁預覽卡片
             curl --fail-with-body -sS \
               -F "file=@chart.png" \
-              -F "payload_json={\"content\":\"${{ env.TARGET_URL }}\"}" \
+              -F "payload_json={\"content\":\"<${{ env.TARGET_URL }}>\"}" \
               "$DISCORD_WEBHOOK"
           else
-            echo "Error: No screenshot file found to upload."
+            echo "錯誤：找不到截圖檔案，跳過發送。"
             exit 1
           fi
