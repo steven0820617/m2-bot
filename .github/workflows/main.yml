@@ -52,8 +52,8 @@ jobs:
               // 使用 networkidle 確保圖表數據請求完成
               await page.goto(process.env.TARGET_URL, { waitUntil: 'networkidle', timeout: 90000 });
 
-              console.log('2. 等待圖表完全渲染 (30s)...');
-              await page.waitForTimeout(30000);
+              console.log('2. 等待圖表完全渲染 (120s)...');
+              await page.waitForTimeout(120000);
 
               console.log('3. 執行全網頁擷取...');
               await page.mouse.move(0, 0); 
