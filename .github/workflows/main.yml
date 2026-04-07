@@ -26,7 +26,8 @@ jobs:
 
       - name: Capture screenshot
         env:
-          TARGET_URL: https://bitcoincounterflow.com
+          # 【絕對修正】確保目標網址為圖表分頁
+          TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
         run: |
           cat > screenshot.js <<'EOF'
           const { chromium } = require('playwright');
@@ -39,7 +40,6 @@ jobs:
 
             try {
               const context = await browser.newContext({
-                // 設定寬度為 1920，高度隨內容自動延伸
                 viewport: { width: 1920, height: 1080 },
                 deviceScaleFactor: 2,
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
@@ -48,26 +48,24 @@ jobs:
               page = await context.newPage();
               page.setDefaultTimeout(90000);
 
-              console.log('1. 前往頁面:', process.env.TARGET_URL);
-              // 改用 networkidle 確保所有圖片與圖表數據載入完畢
+              console.log('1. 前往正確頁面:', process.env.TARGET_URL);
+              // 使用 networkidle 確保圖表數據請求完成
               await page.goto(process.env.TARGET_URL, { waitUntil: 'networkidle', timeout: 90000 });
 
               console.log('2. 等待圖表完全渲染 (30s)...');
-              // 由於是全網頁截圖，給予充足時間讓所有動態元件畫完
               await page.waitForTimeout(30000);
 
-              console.log('3. 執行全網頁截圖...');
+              console.log('3. 執行全網頁擷取...');
               await page.mouse.move(0, 0); 
               await page.screenshot({
                 path: OUT,
-                fullPage: true,      // 【關鍵修正】擷取整個頁面，不分區塊
+                fullPage: true, // 擷取整個頁面，不分區塊
                 animations: 'disabled'
               });
-              console.log('全網頁截圖成功。');
+              console.log('全網頁截圖完成。');
 
             } catch (err) {
               console.error('執行失敗:', err);
-              // 保底截圖：即使報錯也嘗試抓一張目前的畫面
               if (page) {
                 try {
                   await page.screenshot({ path: OUT, fullPage: true, animations: 'disabled' });
@@ -86,7 +84,8 @@ jobs:
         if: always()
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          TARGET_URL: https://bitcoincounterflow.com
+          # 【同步修正】發送至 Discord 的網址
+          TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
         run: |
           if [ -s chart.png ]; then
             # 使用 ` ` 包圍網址：Discord 顯示為灰色不可點擊純文字，且無預覽
