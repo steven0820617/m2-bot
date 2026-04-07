@@ -19,61 +19,59 @@ jobs:
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
-            // 啟動瀏覽器並設定高解析度寬螢幕視窗
+            // 1. 強制設定為 2K 解析度 (2560x1440)，確保網頁佈局完全展開成大圖模式
             const browser = await chromium.launch({ headless: true });
             const context = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-              viewport: { width: 1920, height: 1080 },
-              deviceScaleFactor: 2 // 提高清晰度
+              viewport: { width: 2560, height: 1440 },
+              deviceScaleFactor: 2 
             });
             const page = await context.newPage();
             page.setDefaultTimeout(90000);
 
             try {
-              console.log('1. 前往 M2 圖表頁面...');
-              // 等待網路完全空閒，確保數據 API 請求完成
+              console.log('1. 直接進入圖表頁...');
               await page.goto('https://bitcoincounterflow.com', { 
-                waitUntil: 'networkidle',
-                timeout: 90000 
+                waitUntil: 'networkidle' 
               });
 
-              console.log('2. 注入 CSS 優化佈局並隱藏干擾...');
+              console.log('2. 注入 CSS 強制修復佈局並隱藏廣告彈窗...');
               await page.addStyleTag({ 
                 content: `
-                  /* 停用外部字體避免卡死，並隱藏 Cookie 視窗與廣告 */
-                  * { font-family: sans-serif !important; transition: none !important; animation: none !important; }
-                  .qc-cmp2-container, #qc-cmp2-container { display: none !important; }
-                  /* 強制圖表容器全寬，防止右側數據被擠壓 */
-                  .chart-main-container, .highcharts-container { width: 100% !important; max-width: none !important; }
+                  /* 隱藏 Cookie 彈窗與不需要的側邊欄位，防止干擾截圖 */
+                  .qc-cmp2-container, #qc-cmp2-container, .sidebar, .nav-menu { display: none !important; }
+                  /* 強制主要圖表區域撐開，不要並排顯示 */
+                  .chart-main-container { width: 100% !important; max-width: none !important; display: block !important; }
+                  * { font-family: sans-serif !important; }
                 ` 
               });
 
-              console.log('3. 等待圖表元件出現在畫面上...');
-              const selector = '.chart-main-container, .highcharts-container';
+              console.log('3. 等待 Highcharts 線條動畫與 Canvas 渲染...');
+              // 鎖定該網站最外層的圖表包裝盒
+              const selector = '.chart-main-container';
               await page.waitForSelector(selector, { state: 'visible', timeout: 30000 });
               
-              console.log('4. 額外等待 20 秒，確保 Canvas 動畫與線條渲染完成...');
-              await page.waitForTimeout(20000);
+              // 延長等待時間至 25 秒，確保所有國家的 M2 數據線條都畫完
+              await page.waitForTimeout(25000);
 
-              // 定位具體的圖表區域
+              // 4. 執行精確截圖
               const chart = await page.$(selector);
-              
               if (chart) {
-                console.log('5. 執行局部截圖...');
-                // 截圖前將滑鼠移開，避免觸發數據提示框 (Tooltip)
+                // 將滑鼠移到角落，避免觸發任何 Tooltip 擋住線條
                 await page.mouse.move(0, 0); 
-                await chart.screenshot({ path: 'chart.png', animations: 'disabled' });
-                console.log('成功擷取完整圖表！');
+                await chart.screenshot({ 
+                  path: 'chart.png', 
+                  animations: 'disabled' 
+                });
+                console.log('成功擷取完整比例圖表！');
               } else {
                 throw new Error('找不到圖表容器');
               }
-
             } catch (e) {
-              console.error('偵錯失敗：', e.message);
-              // 失敗保底：抓全螢幕確認當前頁面狀態
-              await page.screenshot({ path: 'chart.png', fullPage: true, animations: 'disabled' });
+              console.error('報錯偵錯：' + e.message);
+              // 失敗時抓全螢幕協助判斷原因
+              await page.screenshot({ path: 'chart.png', fullPage: true });
             }
-
             await browser.close();
           })();
           EOF
@@ -83,7 +81,7 @@ jobs:
         if: always()
         run: |
           if [ -f chart.png ]; then
-            curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📈 **M2 Global Supply Growth 自動更新**\n\`https://bitcoincounterflow.com\`\"}" ${{ secrets.DISCORD_WEBHOOK }}
+            curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📈 **M2 Global Supply Growth 報告**\n\`https://bitcoincounterflow.com\`\"}" ${{ secrets.DISCORD_WEBHOOK }}
           else
-            echo "未產生截圖檔案。"
+            echo "找不到截圖。"
           fi
