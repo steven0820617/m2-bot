@@ -2,7 +2,7 @@ name: M2_Auto_Update
 
 on:
   schedule:
-    - cron: '0 0 * * 2'
+    - cron: '0 0 * * 2' # 每週二 台北時間 08:00
   workflow_dispatch:
 
 jobs:
@@ -26,25 +26,21 @@ jobs:
 
       - name: Capture screenshot
         env:
-          TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
+          TARGET_URL: https://bitcoincounterflow.com
         run: |
           cat > screenshot.js <<'EOF'
           const { chromium } = require('playwright');
           const fs = require('fs');
-          const path = require('path');
-
-          const OUT = path.resolve('chart.png');
-          const URL = process.env.TARGET_URL;
 
           (async () => {
-            let browser;
+            const browser = await chromium.launch({
+              headless: true,
+              args: ['--disable-dev-shm-usage']
+            });
+
+            const OUT = 'chart.png';
 
             try {
-              browser = await chromium.launch({
-                headless: true,
-                args: ['--disable-dev-shm-usage']
-              });
-
               const context = await browser.newContext({
                 viewport: { width: 1920, height: 1080 },
                 deviceScaleFactor: 2,
@@ -53,33 +49,52 @@ jobs:
               });
 
               const page = await context.newPage();
-              page.setDefaultTimeout(60000);
+              page.setDefaultTimeout(90000);
 
-              console.log('Opening:', URL);
-              await page.goto(URL, {
+              console.log('1. Opening URL...');
+              // 【優化 1】改用 domcontentloaded 配合長等待，避免 networkidle 過早觸發
+              await page.goto(process.env.TARGET_URL, {
                 waitUntil: 'domcontentloaded',
-                timeout: 60000
+                timeout: 90000
               });
 
-              await page.waitForTimeout(12000);
+              console.log('2. Waiting for Highcharts rendering (25s)...');
+              await page.waitForTimeout(25000);
 
-              await page.screenshot({
-                path: OUT,
-                fullPage: true,
-                animations: 'disabled',
-                caret: 'hide'
-              });
+              const selector = '.chart-main-container';
+              const chartExists = await page.waitForSelector(selector, { state: 'visible', timeout: 15000 })
+                .catch(() => {
+                  console.log('Selector not found, switching to full page fallback.');
+                  return null;
+                });
 
-              if (!fs.existsSync(OUT) || fs.statSync(OUT).size === 0) {
-                throw new Error('chart.png not created or empty');
+              const chart = await page.$(selector);
+              if (chart && chartExists) {
+                console.log('3. Capturing element screenshot...');
+                await page.mouse.move(0, 0);
+                await chart.screenshot({ path: OUT, animations: 'disabled' });
+              } else {
+                console.log('3. Capturing full page screenshot...');
+                await page.screenshot({ path: OUT, fullPage: true, animations: 'disabled' });
               }
+
+              console.log('Success.');
+
             } catch (err) {
-              console.error('Screenshot pipeline failed:', err);
-              process.exitCode = 1;
-            } finally {
-              if (browser) {
-                await browser.close().catch(() => {});
+              console.error('Pipeline failed:', err);
+              // 【優化 2】最後保底截圖：即便腳本報錯，也嘗試抓一張全螢幕圖發送
+              try {
+                const page = (await browser.pages())[0];
+                if (page) {
+                  await page.screenshot({ path: OUT, fullPage: true, animations: 'disabled' });
+                  console.log('Final fallback screenshot taken.');
+                }
+              } catch (e) {
+                console.error('Final fallback failed.');
               }
+              process.exit(1);
+            } finally {
+              await browser.close();
             }
           })();
           EOF
@@ -90,15 +105,15 @@ jobs:
         if: always()
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          TARGET_URL: https://bitcoincounterflow.com
         run: |
-          set -euo pipefail
-
-          if [ ! -s chart.png ]; then
-            echo "chart.png 不存在或為空，停止上傳"
+          if [ -s chart.png ]; then
+            # 發送純網址內容
+            curl --fail-with-body -sS \
+              -F "file=@chart.png" \
+              -F "payload_json={\"content\":\"${{ env.TARGET_URL }}\"}" \
+              "$DISCORD_WEBHOOK"
+          else
+            echo "Error: No screenshot file found to upload."
             exit 1
           fi
-
-          curl --fail-with-body -sS \
-            -F "file=@chart.png" \
-            -F 'payload_json={"content":"https://bitcoincounterflow.com/charts/m2-global/"}' \
-            "$DISCORD_WEBHOOK"
