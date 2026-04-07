@@ -8,7 +8,7 @@ on:
 jobs:
   screenshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15 
 
     steps:
       - name: Checkout
@@ -26,7 +26,7 @@ jobs:
 
       - name: Capture screenshot
         env:
-          # 【絕對修正】確保目標網址為圖表分頁
+          # 【核對：絕對正確的目標網址】
           TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
         run: |
           cat > screenshot.js <<'EOF'
@@ -46,20 +46,21 @@ jobs:
               });
 
               page = await context.newPage();
-              page.setDefaultTimeout(90000);
+              // 設定 3 分鐘超時，給予 2 分鐘等待充足空間
+              page.setDefaultTimeout(180000); 
 
               console.log('1. 前往正確頁面:', process.env.TARGET_URL);
-              // 使用 networkidle 確保圖表數據請求完成
-              await page.goto(process.env.TARGET_URL, { waitUntil: 'networkidle', timeout: 90000 });
+              await page.goto(process.env.TARGET_URL, { waitUntil: 'networkidle', timeout: 180000 });
 
-              console.log('2. 等待圖表完全渲染 (120s)...');
-              await page.waitForTimeout(120000);
+              console.log('2. 【加強等待】等待圖表渲染 120 秒 (2 分鐘)...');
+              // 等待 120,000 毫秒 (2 分鐘)
+              await page.waitForTimeout(120000); 
 
               console.log('3. 執行全網頁擷取...');
               await page.mouse.move(0, 0); 
               await page.screenshot({
                 path: OUT,
-                fullPage: true, // 擷取整個頁面，不分區塊
+                fullPage: true,      
                 animations: 'disabled'
               });
               console.log('全網頁截圖完成。');
@@ -84,7 +85,7 @@ jobs:
         if: always()
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          # 【同步修正】發送至 Discord 的網址
+          # 【核對：Discord 發送的網址同步修正】
           TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
         run: |
           if [ -s chart.png ]; then
