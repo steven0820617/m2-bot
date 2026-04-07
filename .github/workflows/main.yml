@@ -2,7 +2,7 @@ name: M2_Auto_Update
 
 on:
   schedule:
-    - cron: '0 0 * * 2'
+    - cron: '0 0 * * 2' # 每週二 台北時間 08:00
   workflow_dispatch:
 
 jobs:
@@ -26,10 +26,12 @@ jobs:
 
       - name: Capture screenshot
         env:
-          TARGET_URL: https://bitcoincounterflow.com
+          # 【修正 1】正確的圖表子分頁 URL
+          TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
         run: |
           cat > screenshot.js <<'EOF'
           const { chromium } = require('playwright');
+          const fs = require('fs');
 
           (async () => {
             const browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage'] });
@@ -38,7 +40,7 @@ jobs:
 
             try {
               const context = await browser.newContext({
-                viewport: { width: 1920, height: 1080 },
+                viewport: { width: 1920, height: 1200 },
                 deviceScaleFactor: 2,
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
               });
@@ -46,27 +48,44 @@ jobs:
               page = await context.newPage();
               page.setDefaultTimeout(90000);
 
-              console.log('1. 前往頁面...');
+              console.log('1. 前往頁面:', process.env.TARGET_URL);
               await page.goto(process.env.TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
-              // 【關鍵修正】確保圖表完全載入並等待渲染完成
-              const selector = '.chart-main-container'; 
-              await page.waitForSelector(selector, { state: 'visible', timeout: 30000 }).catch(() => null);
-              await page.waitForTimeout(30000); // 增加等待時間至 30 秒，確保所有線條動畫跑完
+              console.log('2. 定位標題並等待渲染...');
+              // 【優化 1】更穩定的標題定位邏輯
+              const title = page.locator('h1, h2').filter({ hasText: 'M2' }).first();
+              await title.waitFor({ state: 'visible', timeout: 30000 }).catch(() => null);
+              
+              // 補償等待時間確保 Canvas 繪圖完成
+              await page.waitForTimeout(25000);
 
-              const chart = await page.$(selector);
-              if (chart) {
-                console.log('3. 執行精確局部截圖...');
-                await page.mouse.move(0, 0); // 移開滑鼠避免 Tooltip 
-                // 【關鍵參數】使用 chart.screenshot 且不帶其餘參數，這會精確抓取該 HTML 元素範圍
-                await chart.screenshot({ path: OUT });
+              const box = await title.boundingBox();
+              const vp = page.viewportSize();
+
+              if (box && vp) {
+                console.log('3. 執行精確區域裁切...');
+                await page.mouse.move(0, 0); 
+                await page.screenshot({
+                  path: OUT,
+                  clip: {
+                    x: 0,
+                    y: Math.max(0, box.y - 120), // 從標題上方預留空間
+                    width: vp.width,
+                    height: Math.min(vp.height, 1100) // 動態高度，涵蓋圖表與說明
+                  },
+                  animations: 'disabled'
+                });
+                console.log('區域截圖成功。');
               } else {
-                console.log('3. 找不到容器，保底全螢幕截圖...');
-                await page.screenshot({ path: OUT, fullPage: true });
+                console.log('3. 定位失敗，執行全螢幕保底...');
+                await page.screenshot({ path: OUT, fullPage: true, animations: 'disabled' });
               }
 
             } catch (err) {
-              if (page) await page.screenshot({ path: OUT, fullPage: true }).catch(() => {});
+              console.error('嚴重錯誤:', err);
+              if (page) {
+                await page.screenshot({ path: OUT, fullPage: true, animations: 'disabled' }).catch(() => {});
+              }
               process.exit(1);
             } finally {
               await browser.close();
@@ -80,14 +99,15 @@ jobs:
         if: always()
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          TARGET_URL: https://bitcoincounterflow.com
+          TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
         run: |
           if [ -s chart.png ]; then
-            # 使用 < > 包圍網址，確保純網址無預覽
+            # 【修正 2】使用 ` ` 包圍網址：Discord 會顯示為不可點擊的純文字 Code Block
             curl --fail-with-body -sS \
               -F "file=@chart.png" \
-              -F "payload_json={\"content\":\"<${{ env.TARGET_URL }}>\"}" \
+              -F "payload_json={\"content\":\"\`${{ env.TARGET_URL }}\`\"}" \
               "$DISCORD_WEBHOOK"
           else
+            echo "未發現截圖，跳過發送。"
             exit 1
           fi
