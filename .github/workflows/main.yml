@@ -18,7 +18,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: npm
 
       - name: Install Playwright
         run: |
@@ -39,7 +38,6 @@ jobs:
 
           (async () => {
             let browser;
-            let page;
 
             try {
               browser = await chromium.launch({
@@ -54,7 +52,7 @@ jobs:
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
               });
 
-              page = await context.newPage();
+              const page = await context.newPage();
               page.setDefaultTimeout(60000);
 
               console.log('Opening:', URL);
@@ -65,56 +63,19 @@ jobs:
 
               await page.waitForTimeout(12000);
 
-              // 盡量等到頁面標題或主要內容出現
-              await page.locator('body').waitFor({ state: 'visible', timeout: 30000 }).catch(() => {});
-              await page.waitForTimeout(3000);
-
-              // 主截圖：完整頁面
-              try {
-                await page.screenshot({
-                  path: OUT,
-                  fullPage: true,
-                  animations: 'disabled',
-                  caret: 'hide'
-                });
-                console.log('Primary screenshot saved:', OUT);
-              } catch (err1) {
-                console.error('Primary screenshot failed:', err1);
-
-                // 備援截圖：目前可視區
-                await page.screenshot({
-                  path: OUT,
-                  fullPage: false,
-                  animations: 'disabled',
-                  caret: 'hide'
-                });
-                console.log('Fallback screenshot saved:', OUT);
-              }
+              await page.screenshot({
+                path: OUT,
+                fullPage: true,
+                animations: 'disabled',
+                caret: 'hide'
+              });
 
               if (!fs.existsSync(OUT) || fs.statSync(OUT).size === 0) {
                 throw new Error('chart.png not created or empty');
               }
             } catch (err) {
               console.error('Screenshot pipeline failed:', err);
-
-              // 最後備援：若頁面還活著，再試一次可視區截圖
-              try {
-                if (page && !page.isClosed()) {
-                  await page.screenshot({
-                    path: OUT,
-                    fullPage: false,
-                    animations: 'disabled',
-                    caret: 'hide'
-                  });
-                }
-              } catch (err2) {
-                console.error('Final fallback failed:', err2);
-              }
-
-              if (!fs.existsSync(OUT) || fs.statSync(OUT).size === 0) {
-                process.exitCode = 1;
-                return;
-              }
+              process.exitCode = 1;
             } finally {
               if (browser) {
                 await browser.close().catch(() => {});
