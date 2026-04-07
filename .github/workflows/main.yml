@@ -19,46 +19,59 @@ jobs:
           cat << 'EOF' > screenshot.js
           const { chromium } = require('playwright');
           (async () => {
+            // 啟動瀏覽器
             const browser = await chromium.launch({ headless: true });
             const context = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
               viewport: { width: 1600, height: 1200 }
             });
             const page = await context.newPage();
+            
+            // 設定全域超時為 90 秒，避免 GitHub 環境過慢
             page.setDefaultTimeout(90000);
 
             try {
-              console.log('1. 進入首頁建立連線...');
-              await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded' });
-              await page.waitForTimeout(5000);
+              console.log('1. 直接前往目標圖表頁面...');
+              // waitUntil: 'networkidle' 會等待所有數據請求（API/圖表數據）完成
+              await page.goto('https://bitcoincounterflow.com', { 
+                waitUntil: 'networkidle',
+                timeout: 90000 
+              });
 
-              console.log('2. 前往 M2 圖表頁...');
-              // 改回更穩定的直接跳轉，並等待 DOM 載入
-              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
-              
-              console.log('3. 強制注入 CSS 確保字體不卡住...');
-              await page.addStyleTag({ content: `* { font-family: sans-serif !important; }` });
+              console.log('2. 注入 CSS 強制渲染並移除干擾元素...');
+              await page.addStyleTag({ 
+                content: `
+                  * { font-family: sans-serif !important; transition: none !important; animation: none !important; }
+                  .qc-cmp2-container, #qc-cmp2-container { display: none !important; } /* 隱藏 Cookie 彈窗 */
+                ` 
+              });
 
-              console.log('4. 關鍵：等待圖表元件出現...');
-              // 確保頁面不是白的，至少要看到一個圖表容器
-              const selector = '.chart-main-container, .chart-container, .highcharts-container';
+              console.log('3. 等待圖表容器元件出現...');
+              // 針對該站點的圖表容器進行定位
+              const selector = '.chart-main-container, .highcharts-container, #chart-container';
               await page.waitForSelector(selector, { state: 'visible', timeout: 30000 });
-              
-              console.log('5. 額外等待 10 秒讓畫布渲染完成...');
-              await page.waitForTimeout(10000);
 
-              const chart = await page.$(selector);
+              console.log('4. 額外停頓 15 秒，確保 Canvas 繪圖動畫跑完...');
+              await page.waitForTimeout(15000);
+
+              // 檢查是否有找到具體圖表區域
+              const chart = await page.$('.chart-main-container') || await page.$('.highcharts-container');
+              
               if (chart) {
+                console.log('5. 執行局部截圖...');
                 await chart.screenshot({ path: 'chart.png', animations: 'disabled' });
-                console.log('成功擷取圖表！');
               } else {
-                throw new Error('找不到圖表容器');
+                console.log('5. 找不到特定容器，改為全螢幕截圖...');
+                await page.screenshot({ path: 'chart.png', animations: 'disabled' });
               }
+              console.log('截圖流程完成！');
+
             } catch (e) {
-              console.error('偵錯：' + e.message);
-              // 如果失敗，抓一張全螢幕照片看看畫面上到底是什麼（避免又是白的）
-              await page.screenshot({ path: 'chart.png', fullPage: true });
+              console.error('執行失敗：', e.message);
+              // 失敗保底：抓一張全螢幕照片確認畫面狀態（是否卡在登入或廣告）
+              await page.screenshot({ path: 'chart.png', fullPage: true, animations: 'disabled' });
             }
+
             await browser.close();
           })();
           EOF
@@ -68,7 +81,7 @@ jobs:
         if: always()
         run: |
           if [ -f chart.png ]; then
-            curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"\`https://bitcoincounterflow.comcharts/m2-global/\`\"}" ${{ secrets.DISCORD_WEBHOOK }}
+            curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"📈 **M2 Global Supply Growth 自動更新**\n\`https://bitcoincounterflow.com\`\"}" ${{ secrets.DISCORD_WEBHOOK }}
           else
-            echo "No screenshot found."
+            echo "找不到截圖檔案，無法發送至 Discord。"
           fi
