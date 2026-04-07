@@ -25,47 +25,39 @@ jobs:
               viewport: { width: 1600, height: 1200 }
             });
             const page = await context.newPage();
-            
-            // 【修正 1】將預設 30 秒超時延長至 90 秒，避免 GitHub 網路波動
             page.setDefaultTimeout(90000);
 
             try {
-              console.log('1. 進入首頁...');
-              // 【修正 2】改用 domcontentloaded，不強制死等所有背景廣告/字體載入完畢
+              console.log('1. 進入首頁建立連線...');
               await page.goto('https://bitcoincounterflow.com', { waitUntil: 'domcontentloaded' });
               await page.waitForTimeout(5000);
 
-              console.log('2. 跳轉到圖表頁...');
-              await page.evaluate(() => { window.location.href = 'https://bitcoincounterflow.comcharts/m2-global/'; });
+              console.log('2. 前往 M2 圖表頁...');
+              // 改回更穩定的直接跳轉，並等待 DOM 載入
+              await page.goto('https://bitcoincounterflow.comcharts/m2-global/', { waitUntil: 'domcontentloaded' });
               
-              console.log('3. 等待頁面穩定與數據渲染 (60秒)...');
-              await page.waitForTimeout(60000); 
+              console.log('3. 強制注入 CSS 確保字體不卡住...');
+              await page.addStyleTag({ content: `* { font-family: sans-serif !important; }` });
 
-              // 【修正 3】注入 CSS 解決 "waiting for fonts to load" 的卡死問題
-              await page.addStyleTag({ 
-                content: `* { font-family: sans-serif !important; transition: none !important; animation: none !important; }` 
-              });
-
-              console.log('目前所在網址：' + page.url());
-
-              const chart = await page.$('.chart-main-container') || await page.$('.chart-container') || await page.$('.highcharts-container');
+              console.log('4. 關鍵：等待圖表元件出現...');
+              // 確保頁面不是白的，至少要看到一個圖表容器
+              const selector = '.chart-main-container, .chart-container, .highcharts-container';
+              await page.waitForSelector(selector, { state: 'visible', timeout: 30000 });
               
-              if (chart && page.url().includes('m2-global')) {
-                // 【修正 4】截圖時禁用動畫等待，防止無限期等待渲染
+              console.log('5. 額外等待 10 秒讓畫布渲染完成...');
+              await page.waitForTimeout(10000);
+
+              const chart = await page.$(selector);
+              if (chart) {
                 await chart.screenshot({ path: 'chart.png', animations: 'disabled' });
-                console.log('成功截取完整圖表區域！');
+                console.log('成功擷取圖表！');
               } else {
-                await page.screenshot({ path: 'chart.png', animations: 'disabled' });
-                console.log('未找到特定容器，截取全螢幕供檢查。');
+                throw new Error('找不到圖表容器');
               }
             } catch (e) {
-              console.error('執行過程中發生錯誤:', e.message);
-              // 保底截圖：即便失敗也嘗試抓一張圖，並設定極短超時避免 Workflow 永久掛載
-              try {
-                await page.screenshot({ path: 'chart.png', animations: 'disabled', timeout: 10000 });
-              } catch (err) {
-                console.error('保底截圖亦失敗');
-              }
+              console.error('偵錯：' + e.message);
+              // 如果失敗，抓一張全螢幕照片看看畫面上到底是什麼（避免又是白的）
+              await page.screenshot({ path: 'chart.png', fullPage: true });
             }
             await browser.close();
           })();
@@ -73,10 +65,10 @@ jobs:
           node screenshot.js
 
       - name: Post to Discord
-        if: always() # 確保即便前面的步驟報錯，也能嘗試發送截圖（或錯誤提示）
+        if: always()
         run: |
           if [ -f chart.png ]; then
             curl -X POST -F "file=@chart.png" -F "payload_json={\"content\": \"\`https://bitcoincounterflow.comcharts/m2-global/\`\"}" ${{ secrets.DISCORD_WEBHOOK }}
           else
-            curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"❌ M2 自動更新失敗：截圖超時或無法產生檔案。\"}" ${{ secrets.DISCORD_WEBHOOK }}
+            echo "No screenshot found."
           fi
