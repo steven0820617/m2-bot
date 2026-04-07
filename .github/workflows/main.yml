@@ -2,7 +2,7 @@ name: M2_Auto_Update
 
 on:
   schedule:
-    - cron: '0 0 * * 2' # 每週二 台北時間 08:00
+    - cron: '17 0 * * 2' # 每週二 台北時間 08:00
   workflow_dispatch:
 
 jobs:
