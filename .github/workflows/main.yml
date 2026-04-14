@@ -1,12 +1,19 @@
 name: M2_Auto_Update
 
 on:
+  # 加上 push 是為了強制讓 GitHub 偵測到這個檔案的更新
+  push:
+    branches: [ "main" ]
   schedule:
+    # 每 5 分鐘跑一次 (測試成功後再改回週二)
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
   screenshot:
+    # 這裡的 if 確保：只有「自動排程」或「手動點擊」才會執行截圖發送
+    # 當你 Push (儲存檔案) 時，它只會顯示成功，不會真的去執行下面的步驟
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15 
 
