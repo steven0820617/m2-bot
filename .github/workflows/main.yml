@@ -1,6 +1,7 @@
 name: m2-bot
 
 on:
+  # 加上 push 是為了強制讓 GitHub 偵測到這個檔案的更新
   push:
     branches: [ "main" ]
   # 接收來自 Google Apps Script 的外部觸發
@@ -11,7 +12,7 @@ on:
 
 jobs:
   screenshot:
-    # 核心修改：確保外部觸發與手動點擊能通過判斷，Push 則不執行
+    # 核心修改：確保僅在「外部觸發」或「手動點擊」時執行，Push 則會跳過此 Job
     if: github.event_name == 'repository_dispatch' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15 
