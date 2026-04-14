@@ -1,19 +1,18 @@
 name: m2-bot
 
 on:
-  # 加上 push 是為了強制讓 GitHub 偵測到這個檔案的更新
   push:
     branches: [ "main" ]
-  schedule:
-    # 每 5 分鐘跑一次 (測試成功後再改回週二)
-    - cron: '59 5 * * *'
+  # 接收來自 Google Apps Script 的外部觸發
+  repository_dispatch:
+    types: [ "gas_trigger" ] 
+  # 保留手動觸發選項
   workflow_dispatch:
 
 jobs:
   screenshot:
-    # 這裡的 if 確保：只有「自動排程」或「手動點擊」才會執行截圖發送
-    # 當你 Push (儲存檔案) 時，它只會顯示成功，不會真的去執行下面的步驟
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # 核心修改：確保外部觸發與手動點擊能通過判斷，Push 則不執行
+    if: github.event_name == 'repository_dispatch' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15 
 
@@ -33,7 +32,6 @@ jobs:
 
       - name: Capture screenshot
         env:
-          # 【核對：絕對正確的目標網址】
           TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
         run: |
           cat > screenshot.js <<'EOF'
@@ -53,14 +51,12 @@ jobs:
               });
 
               page = await context.newPage();
-              // 設定 3 分鐘超時，給予 2 分鐘等待充足空間
               page.setDefaultTimeout(180000); 
 
               console.log('1. 前往正確頁面:', process.env.TARGET_URL);
               await page.goto(process.env.TARGET_URL, { waitUntil: 'networkidle', timeout: 180000 });
 
               console.log('2. 【加強等待】等待圖表渲染 120 秒 (2 分鐘)...');
-              // 等待 120,000 毫秒 (2 分鐘)
               await page.waitForTimeout(120000); 
 
               console.log('3. 執行全網頁擷取...');
@@ -92,11 +88,9 @@ jobs:
         if: always()
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          # 【核對：Discord 發送的網址同步修正】
           TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
         run: |
           if [ -s chart.png ]; then
-            # 使用 ` ` 包圍網址：Discord 顯示為灰色不可點擊純文字，且無預覽
             curl --fail-with-body -sS \
               -F "file=@chart.png" \
               -F "payload_json={\"content\":\"\`${{ env.TARGET_URL }}\`\"}" \
