@@ -1,4 +1,4 @@
-name: M2_Auto_Update
+name: m2-bot
 
 on:
   # 加上 push 是為了強制讓 GitHub 偵測到這個檔案的更新
@@ -6,7 +6,7 @@ on:
     branches: [ "main" ]
   schedule:
     # 每 5 分鐘跑一次 (測試成功後再改回週二)
-    - cron: '45 2 * * *'
+    - cron: '59 5 * * *'
   workflow_dispatch:
 
 jobs:
