@@ -78,33 +78,36 @@ jobs:
           (async()=>{
 
 
-            const browser =
-              await chromium.launch({
+            const browser = await chromium.launch({
 
-                headless:true,
+              headless:true,
 
-                args:[
+              channel:"chrome",
 
-                  "--disable-dev-shm-usage",
+              args:[
 
-                  "--no-sandbox",
+                "--no-sandbox",
 
-                  "--disable-setuid-sandbox"
+                "--disable-setuid-sandbox",
 
-                ]
+                "--disable-dev-shm-usage",
 
-              });
+                "--disable-blink-features=AutomationControlled"
+
+              ]
+
+            });
 
 
 
             let page;
 
 
+
             try{
 
 
-              const context =
-              await browser.newContext({
+              const context = await browser.newContext({
 
                 viewport:{
 
@@ -114,18 +117,35 @@ jobs:
 
                 },
 
-                deviceScaleFactor:1,
 
                 locale:"en-US",
 
-                timezoneId:"Asia/Taipei"
+
+                timezoneId:"Asia/Taipei",
+
+
+                userAgent:
+
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+
+
+                extraHTTPHeaders:{
+
+
+                  "Accept-Language":
+
+                  "en-US,en;q=0.9"
+
+
+                }
+
 
               });
 
 
 
-              page =
-              await context.newPage();
+              page = await context.newPage();
+
 
 
               page.setDefaultTimeout(180000);
@@ -133,8 +153,11 @@ jobs:
 
 
               console.log(
+
                 "Opening:",
+
                 process.env.TARGET_URL
+
               );
 
 
@@ -145,7 +168,7 @@ jobs:
 
                 {
 
-                  waitUntil:"domcontentloaded",
+                  waitUntil:"networkidle",
 
                   timeout:180000
 
@@ -156,13 +179,41 @@ jobs:
 
 
               console.log(
-                "Waiting chart render..."
+
+                "Checking page..."
+
               );
 
 
-              await page.waitForTimeout(
-                120000
+
+              await page.waitForTimeout(15000);
+
+
+
+              const title = await page.title();
+
+
+              console.log(
+
+                "TITLE:",
+
+                title
+
               );
+
+
+
+              await page.mouse.move(
+
+                800,
+
+                400
+
+              );
+
+
+
+              await page.waitForTimeout(3000);
 
 
 
@@ -179,7 +230,9 @@ jobs:
 
 
               console.log(
-                "Screenshot done"
+
+                "Screenshot success"
+
               );
 
 
@@ -195,6 +248,7 @@ jobs:
 
               if(page){
 
+
                 await page.screenshot({
 
                   path:ERROR,
@@ -202,6 +256,7 @@ jobs:
                   fullPage:true
 
                 });
+
 
               }
 
@@ -219,6 +274,7 @@ jobs:
 
 
             }
+
 
 
           })();
@@ -264,10 +320,6 @@ jobs:
           if [ -f chart.png ]; then
 
 
-            echo "Sending chart.png"
-
-
-
             curl \
               --fail-with-body \
               -sS \
@@ -278,10 +330,6 @@ jobs:
 
 
           elif [ -f error.png ]; then
-
-
-            echo "Sending error.png"
-
 
 
             curl \
