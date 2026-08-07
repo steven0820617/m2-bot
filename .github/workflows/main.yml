@@ -1,102 +1,269 @@
 name: m2-bot
 
 on:
-  # 加上 push 是為了強制讓 GitHub 偵測到這個檔案的更新
+
   push:
-    branches: [ "main" ]
-  # 接收來自 Google Apps Script 的外部觸發
+    branches:
+      - "main"
+
   repository_dispatch:
-    types: [ "gas_trigger" ] 
-  # 保留手動觸發選項
+    types:
+      - "gas_trigger"
+
   workflow_dispatch:
 
+
 jobs:
+
   screenshot:
-    # 核心修改：確保僅在「外部觸發」或「手動點擊」時執行，Push 則會跳過此 Job
+
     if: github.event_name == 'repository_dispatch' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15 
+
+    runs-on: ubuntu-22.04
+
+    timeout-minutes: 15
+
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
+
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
+
 
       - name: Install Playwright
         run: |
-          npm install --no-save playwright
+          npm init -y
+          npm install playwright@1.51.1
           npx playwright install --with-deps chromium
 
-      - name: Capture screenshot
-        env:
-          TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
-        run: |
-          cat > screenshot.js <<'EOF'
-          const { chromium } = require('playwright');
-          const fs = require('fs');
 
-          (async () => {
-            const browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage'] });
-            const OUT = 'chart.png';
+      - name: Capture screenshot
+
+        env:
+
+          TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
+
+
+        run: |
+
+          cat > screenshot.js <<'EOF'
+
+          const { chromium } = require("playwright");
+
+
+          const OUT = "chart.png";
+          const ERROR = "error.png";
+
+
+          (async()=>{
+
+
+            const browser =
+              await chromium.launch({
+
+                headless:true,
+
+                args:[
+
+                  "--disable-dev-shm-usage",
+                  "--no-sandbox",
+                  "--disable-setuid-sandbox"
+
+                ]
+
+              });
+
+
+
             let page;
 
-            try {
-              const context = await browser.newContext({
-                viewport: { width: 1920, height: 1080 },
-                deviceScaleFactor: 2,
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-              });
 
-              page = await context.newPage();
-              page.setDefaultTimeout(180000); 
 
-              console.log('1. 前往正確頁面:', process.env.TARGET_URL);
-              await page.goto(process.env.TARGET_URL, { waitUntil: 'networkidle', timeout: 180000 });
+            try{
 
-              console.log('2. 【加強等待】等待圖表渲染 120 秒 (2 分鐘)...');
-              await page.waitForTimeout(120000); 
 
-              console.log('3. 執行全網頁擷取...');
-              await page.mouse.move(0, 0); 
+              const context =
+                await browser.newContext({
+
+                  viewport:{
+
+                    width:1920,
+                    height:1080
+
+                  },
+
+                  deviceScaleFactor:1,
+
+                  locale:"en-US",
+
+                  timezoneId:"Asia/Taipei"
+
+                });
+
+
+
+              page =
+                await context.newPage();
+
+
+
+              page.setDefaultTimeout(180000);
+
+
+
+              console.log(
+                "開啟:",
+                process.env.TARGET_URL
+              );
+
+
+
+              await page.goto(
+
+                process.env.TARGET_URL,
+
+                {
+
+                  waitUntil:"domcontentloaded",
+
+                  timeout:180000
+
+                }
+
+              );
+
+
+
+              console.log(
+                "等待圖表載入..."
+              );
+
+
+              await page.waitForTimeout(
+                120000
+              );
+
+
+
+              await page.mouse.move(
+                500,
+                500
+              );
+
+
+
               await page.screenshot({
-                path: OUT,
-                fullPage: true,      
-                animations: 'disabled'
-              });
-              console.log('全網頁截圖完成。');
 
-            } catch (err) {
-              console.error('執行失敗:', err);
-              if (page) {
-                try {
-                  await page.screenshot({ path: OUT, fullPage: true, animations: 'disabled' });
-                } catch (e) {}
-              }
-              process.exit(1);
-            } finally {
-              await browser.close();
+                path:OUT,
+
+                fullPage:true,
+
+                animations:"disabled"
+
+              });
+
+
+
+              console.log(
+                "完成"
+              );
+
+
             }
+
+
+            catch(err){
+
+
+              console.error(
+                err
+              );
+
+
+              if(page){
+
+                await page.screenshot({
+
+                  path:ERROR,
+
+                  fullPage:true
+
+                });
+
+              }
+
+
+              process.exit(1);
+
+
+            }
+
+
+            finally{
+
+
+              await browser.close();
+
+
+            }
+
+
           })();
+
           EOF
+
 
           node screenshot.js
 
+
+
       - name: Send to Discord
+
         if: always()
+
+
         env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
-        run: |
-          if [ -s chart.png ]; then
+
+          DISCORD_WEBHOOK:
+            ${{ secrets.DISCORD_WEBHOOK }}
+
+
+          TARGET_URL:
+            https://bitcoincounterflow.com/charts/m2-global/
+
+
+        run:
+
+
+          if [ -f chart.png ]; then
+
+
             curl --fail-with-body -sS \
               -F "file=@chart.png" \
-              -F "payload_json={\"content\":\"\`${{ env.TARGET_URL }}\`\"}" \
+              -F "payload_json={\"content\":\"📊 M2 Chart\n${TARGET_URL}\"}" \
               "$DISCORD_WEBHOOK"
+
+
+          elif [ -f error.png ]; then
+
+
+            curl --fail-with-body -sS \
+              -F "file=@error.png" \
+              -F "payload_json={\"content\":\"❌ Screenshot failed\n${TARGET_URL}\"}" \
+              "$DISCORD_WEBHOOK"
+
+
           else
-            echo "找不到截圖檔案。"
+
+
+            echo "沒有任何圖片輸出"
             exit 1
+
+
           fi
