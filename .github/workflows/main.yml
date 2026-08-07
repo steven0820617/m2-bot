@@ -26,21 +26,33 @@ jobs:
 
     steps:
 
+
       - name: Checkout
+
         uses: actions/checkout@v4
 
 
+
       - name: Setup Node
+
         uses: actions/setup-node@v4
+
         with:
-          node-version: "20"
+
+          node-version: "22"
+
 
 
       - name: Install Playwright
+
         run: |
+
           npm init -y
+
           npm install playwright@1.51.1
+
           npx playwright install --with-deps chromium
+
 
 
       - name: Capture screenshot
@@ -52,7 +64,9 @@ jobs:
 
         run: |
 
+
           cat > screenshot.js <<'EOF'
+
 
           const { chromium } = require("playwright");
 
@@ -72,7 +86,9 @@ jobs:
                 args:[
 
                   "--disable-dev-shm-usage",
+
                   "--no-sandbox",
+
                   "--disable-setuid-sandbox"
 
                 ]
@@ -84,33 +100,32 @@ jobs:
             let page;
 
 
-
             try{
 
 
               const context =
-                await browser.newContext({
+              await browser.newContext({
 
-                  viewport:{
+                viewport:{
 
-                    width:1920,
-                    height:1080
+                  width:1920,
 
-                  },
+                  height:1080
 
-                  deviceScaleFactor:1,
+                },
 
-                  locale:"en-US",
+                deviceScaleFactor:1,
 
-                  timezoneId:"Asia/Taipei"
+                locale:"en-US",
 
-                });
+                timezoneId:"Asia/Taipei"
+
+              });
 
 
 
               page =
-                await context.newPage();
-
+              await context.newPage();
 
 
               page.setDefaultTimeout(180000);
@@ -118,7 +133,7 @@ jobs:
 
 
               console.log(
-                "開啟:",
+                "Opening:",
                 process.env.TARGET_URL
               );
 
@@ -141,19 +156,12 @@ jobs:
 
 
               console.log(
-                "等待圖表載入..."
+                "Waiting chart render..."
               );
 
 
               await page.waitForTimeout(
                 120000
-              );
-
-
-
-              await page.mouse.move(
-                500,
-                500
               );
 
 
@@ -171,7 +179,7 @@ jobs:
 
 
               console.log(
-                "完成"
+                "Screenshot done"
               );
 
 
@@ -181,9 +189,8 @@ jobs:
             catch(err){
 
 
-              console.error(
-                err
-              );
+              console.error(err);
+
 
 
               if(page){
@@ -216,10 +223,13 @@ jobs:
 
           })();
 
+
           EOF
 
 
+
           node screenshot.js
+
 
 
 
@@ -230,39 +240,64 @@ jobs:
 
         env:
 
-          DISCORD_WEBHOOK:
-            ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
+          TARGET_URL: https://bitcoincounterflow.com/charts/m2-global/
 
 
-          TARGET_URL:
-            https://bitcoincounterflow.com/charts/m2-global/
+        shell: bash
 
 
-        run:
+        run: |
+
+
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+
+            echo "ERROR: DISCORD_WEBHOOK 未設定"
+
+            exit 1
+
+          fi
+
 
 
           if [ -f chart.png ]; then
 
 
-            curl --fail-with-body -sS \
+            echo "Sending chart.png"
+
+
+
+            curl \
+              --fail-with-body \
+              -sS \
               -F "file=@chart.png" \
-              -F "payload_json={\"content\":\"📊 M2 Chart\n${TARGET_URL}\"}" \
+              -F "payload_json={\"content\":\"📊 M2 Chart Screenshot ${TARGET_URL}\"}" \
               "$DISCORD_WEBHOOK"
+
 
 
           elif [ -f error.png ]; then
 
 
-            curl --fail-with-body -sS \
+            echo "Sending error.png"
+
+
+
+            curl \
+              --fail-with-body \
+              -sS \
               -F "file=@error.png" \
-              -F "payload_json={\"content\":\"❌ Screenshot failed\n${TARGET_URL}\"}" \
+              -F "payload_json={\"content\":\"❌ Screenshot Failed ${TARGET_URL}\"}" \
               "$DISCORD_WEBHOOK"
+
 
 
           else
 
 
-            echo "沒有任何圖片輸出"
+            echo "No screenshot file"
+
             exit 1
 
 
